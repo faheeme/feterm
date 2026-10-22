@@ -6,7 +6,7 @@
 # ---------------------------------------------------------------------------
 NAME       ?= feterm
 DISPLAY_NAME ?= FeTerm
-VERSION    ?= 0.1.0
+VERSION    ?= 0.2.0
 APP_ID     ?= io.github.$(NAME)
 PREFIX     ?= /usr/local
 DATADIR    ?= $(PREFIX)/share/$(NAME)
