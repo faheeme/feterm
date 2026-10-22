@@ -6,9 +6,12 @@
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
+#include "app/banner.h"
 #include "app/layout.h"
 #include "app/pane.h"
 #include "config/config.h"
@@ -22,10 +25,12 @@
 #include "input/mouse.h"
 #include "platform/platform.h"
 #include "render/font.h"
+#include "remote/remote.h"
 #include "render/renderer.h"
 #include "sessions/launch.h"
 #include "sessions/serial.h"
 #include "sessions/telnet.h"
+#include "ui/files.h"
 #include "ui/paint.h"
 #include "ui/search.h"
 #include "ui/selection.h"
@@ -125,7 +130,18 @@ typedef struct app {
     bool          sb_ready;
     char          self_exe[TE_PATH_MAX];
     char          control_dir[TE_PATH_MAX];   /* "" when SSH connection sharing is unavailable */
+
+    /* File browser connections, one per SSH pane that has shown the Files tab */
+    struct {
+        uint32_t   pane_id;
+        te_remote *r;
+        char       last_cwd[1024];   /* last folder the remote shell reported (OSC 7) */
+    } remotes[MAX_PANES];
+    char          edit_root[TE_PATH_MAX];      /* private folder for edit-locally copies */
+    char          download_dir[1024];          /* expanded [files] download_dir */
 } app;
+
+static void drop_remote(app *a, uint32_t pane_id);
 
 /* ------------------------------------------------------------------------- */
 /* CLI */
@@ -201,6 +217,7 @@ static void show_toast(app *a, const char *msg)
     }
     a->toast_until_ms = plat_ticks_ms() + TOAST_MS;
     a->need_render = true;
+    LOG_D("toast: %s", a->toast);
 }
 
 static void note_input(app *a)
@@ -510,6 +527,33 @@ static te_pane *spawn_pane(app *a, const char *cwd, const char *const *argv)
     return p;
 }
 
+/* The welcome banner at the top of a new local shell (before its first prompt). */
+static void show_banner(app *a, te_pane *p)
+{
+    if (!a->cfg.banner || p == nullptr) {
+        return;
+    }
+    const te_font_metrics *m = font_metrics(a->font);
+    int cw = m->cell_w > 0 ? m->cell_w : 8;
+    int ch = m->cell_h > 0 ? m->cell_h : 16;
+    uint16_t rows = 2;
+    /* A square logo two lines tall: as many columns as that height in cells. */
+    uint16_t cols = (uint16_t)TE_CLAMP((rows * ch + cw / 2) / cw, 2, 8);
+    const uint8_t *rgba = nullptr;
+    size_t len = 0;
+    int px = rows * ch > 64 ? 128 : 64;   /* sharp on HiDPI, small otherwise */
+    if (!plat_logo_rgba(px, &rgba, &len) && !plat_logo_rgba(64, &rgba, &len)) {
+        rgba = nullptr;
+    }
+    uint32_t side = rgba != nullptr ? (uint32_t)(len == 128u * 128u * 4u ? 128 : 64) : 0;
+    char *text = nullptr;
+    size_t n = 0;
+    if (banner_build(rgba, len, side, cols, rows, &text, &n) == TE_OK) {
+        term_feed(p->term, (const uint8_t *)text, n);
+        TE_FREE(text);
+    }
+}
+
 static void inherit_cwd(app *a, char *out, size_t outsz, const char **cwd)
 {
     *cwd = nullptr;
@@ -534,6 +578,7 @@ static void close_pane(app *a, te_pane *p)
         TE_FREE(a->pending_paste);
         a->modal[0] = '\0';
     }
+    drop_remote(a, p->id);   /* its file browser connection goes with it */
     if (p->tag >= 0) {
         plat_unwatch_fd(a->plat, p->tag);
     }
@@ -563,6 +608,7 @@ static void new_tab(app *a)
         return;
     }
     relayout(a);
+    show_banner(a, p);   /* after its final size: a width change would drop the logo */
     update_window_title(a);
 }
 
@@ -582,6 +628,7 @@ static void split(app *a, bool side_by_side)
         return;
     }
     relayout(a);
+    show_banner(a, p);
     update_window_title(a);
 }
 
@@ -644,6 +691,7 @@ static void host_sb_connect(void *user, const te_session *s, const te_session_ef
     }
     p->sess = ps;   /* the pane owns it now; argv points into it, for reconnecting */
     ps = nullptr;
+    bool banner = s->type == TE_SESS_LOCAL && s->command[0] == '\0';   /* a saved local shell starts like any other */
     p->started_ms = plat_ticks_ms();
     p->last_input_ms = p->started_ms;
     apply_session_highlight(p, s);
@@ -658,6 +706,9 @@ static void host_sb_connect(void *user, const te_session *s, const te_session_ef
     }
     sidebar_blur(&a->sb);
     relayout(a);
+    if (banner) {
+        show_banner(a, p);
+    }
     update_window_title(a);
 }
 
@@ -797,6 +848,159 @@ static void send_break(app *a)
         show_toast(a, "SSH: press Enter, then type ~B to send a Break");
     } else {
         show_toast(a, "Break is for serial and Telnet sessions");
+    }
+}
+
+/* ------------------------------------------------------------------------- */
+/* File browser */
+
+static void host_files_dialog(void *user, te_dialog_kind kind, int request)
+{
+    app *a = user;
+    const char *def = kind == TE_DIALOG_CHOOSE_FOLDER ? a->download_dir : getenv("HOME");
+    plat_file_dialog(a->plat, kind, def, request);
+}
+
+static bool host_r_watch(void *user, int fd, int *tag)
+{
+    app *a = user;
+    return plat_watch_fd(a->plat, fd, tag) == TE_OK;
+}
+
+static void host_r_unwatch(void *user, int tag)
+{
+    app *a = user;
+    plat_unwatch_fd(a->plat, tag);
+}
+
+static void host_r_rearm(void *user, int tag)
+{
+    app *a = user;
+    plat_fd_rearm(a->plat, tag);
+}
+
+static void host_r_changed(void *user)
+{
+    app *a = user;
+    a->need_render = true;
+}
+
+static void host_r_prompt(void *user, te_remote *r, te_prompt_kind kind, const char *text)
+{
+    app *a = user;
+    layout_sidebar(a);
+    files_prompt(&a->sb.files, r, kind, text);
+    a->need_render = true;
+}
+
+/* Open a downloaded copy in the user's editor (or the desktop default), without a shell. */
+static void host_r_edit_open(void *user, const char *path)
+{
+    app *a = user;
+    char buf[1024] = { 0 };
+    const char *argv[10] = { 0 };
+    size_t n = 0;
+    if (a->cfg.editor[0] != '\0' && str_copy(buf, sizeof buf, a->cfg.editor) == TE_OK) {
+        char *save = nullptr;
+        for (char *tok = strtok_r(buf, " ", &save); tok != nullptr && n < 8; tok = strtok_r(nullptr, " ", &save)) {
+            argv[n++] = tok;
+        }
+    }
+    if (n == 0) {
+        argv[n++] = "xdg-open";
+    }
+    argv[n++] = path;
+    argv[n] = nullptr;
+    if (spawn_detached(argv) != TE_OK) {
+        show_toast(a, "Could not start the editor; set [files] editor in config.ini");
+    }
+}
+
+static te_remote *remote_for(const app *a, uint32_t pane_id)
+{
+    for (size_t i = 0; i < MAX_PANES; i++) {
+        if (a->remotes[i].r != nullptr && a->remotes[i].pane_id == pane_id) {
+            return a->remotes[i].r;
+        }
+    }
+    return nullptr;
+}
+
+static void drop_remote(app *a, uint32_t pane_id)
+{
+    for (size_t i = 0; i < MAX_PANES; i++) {
+        if (a->remotes[i].r != nullptr && a->remotes[i].pane_id == pane_id) {
+            if (a->sb.files.remote == a->remotes[i].r) {
+                files_set_remote(&a->sb.files, nullptr, false);
+            }
+            if (a->sb.files.prompt_remote == a->remotes[i].r) {
+                a->sb.files.prompt_remote = nullptr;
+            }
+            remote_destroy(&a->remotes[i].r);
+            a->remotes[i].pane_id = 0;
+            a->remotes[i].last_cwd[0] = '\0';
+        }
+    }
+}
+
+/* Point the Files tab at the focused pane's connection, opening it on first use. */
+static void update_files(app *a)
+{
+    if (!a->sb_ready) {
+        return;
+    }
+    te_pane *p = focus_pane(a);
+    bool ssh = p != nullptr && p->sess != nullptr && p->sess->s.type == TE_SESS_SSH && !p->disconnected;
+    te_remote *r = ssh ? remote_for(a, p->id) : nullptr;
+    bool showing = a->sb.visible && a->sb.tab == TE_SB_FILES;
+    if (ssh && r == nullptr && showing) {
+        size_t slot = MAX_PANES;
+        for (size_t i = 0; i < MAX_PANES && slot == MAX_PANES; i++) {
+            if (a->remotes[i].r == nullptr) slot = i;
+        }
+        char edit_dir[TE_PATH_MAX] = { 0 };
+        if (a->edit_root[0] != '\0') {
+            (void)str_fmt(edit_dir, sizeof edit_dir, "%s/%u", a->edit_root, (unsigned)p->id);
+        }
+        te_remote_opts ro = { .control_dir = a->control_dir, .edit_dir = edit_dir, .keepalive = a->cfg.keepalive };
+        te_remote_host rh = {
+            .user = a, .watch = host_r_watch, .unwatch = host_r_unwatch, .rearm = host_r_rearm,
+            .changed = host_r_changed, .prompt = host_r_prompt, .toast = host_sb_toast, .edit_open = host_r_edit_open,
+        };
+        if (slot < MAX_PANES && remote_create(&a->remotes[slot].r, &p->sess->s, &p->sess->eff, &ro, &rh) == TE_OK) {
+            a->remotes[slot].pane_id = p->id;
+            a->remotes[slot].last_cwd[0] = '\0';
+            r = a->remotes[slot].r;
+            remote_connect(r);
+        }
+    }
+    files_set_remote(&a->sb.files, r, ssh);
+    /* Follow the remote shell's folder when it reports one (OSC 7). */
+    if (r != nullptr && a->cfg.follow_terminal && remote_state(r) == TE_RS_READY) {
+        for (size_t i = 0; i < MAX_PANES; i++) {
+            if (a->remotes[i].r == r) {
+                const char *cwd = term_cwd(p->term);
+                if (cwd != nullptr && cwd[0] == '/' && strcmp(cwd, a->remotes[i].last_cwd) != 0) {
+                    (void)str_copy(a->remotes[i].last_cwd, sizeof a->remotes[i].last_cwd, cwd);
+                    files_follow(&a->sb.files, cwd);
+                }
+            }
+        }
+    }
+}
+
+static void apply_files_config(app *a)
+{
+    char dir[1024] = { 0 };
+    if (launch_expand_home(a->cfg.download_dir, dir, sizeof dir) != TE_OK || dir[0] != '/') {
+        (void)launch_expand_home("~/Downloads", dir, sizeof dir);
+    }
+    (void)str_copy(a->download_dir, sizeof a->download_dir, dir);
+    if (mkdir(a->download_dir, 0755) != 0 && errno != EEXIST) {
+        LOG_W("cannot create the download folder %s: %s", a->download_dir, strerror(errno));
+    }
+    if (a->sb_ready) {
+        files_set_download_dir(&a->sb.files, a->download_dir);
     }
 }
 
@@ -1009,6 +1213,7 @@ static void reload_config(app *a)
         pane_setup_highlight(all[i], &a->cfg);
     }
     update_opacity(a);
+    apply_files_config(a);
     if (a->sb_ready) {
         sidebar_configure(&a->sb, a->cfg.sidebar_visible, a->cfg.sidebar_right, a->cfg.sidebar_width, false);
         sidebar_reload(&a->sb);
@@ -1445,7 +1650,8 @@ static void on_button(app *a, const te_event *ev)
                     (sidebar_contains(&a->sb, ev->button.x, ev->button.y) ||
                      sidebar_on_edge(&a->sb, ev->button.x, ev->button.y)))) {
         int sbtn = b == TE_MB_LEFT ? 0 : (b == TE_MB_MIDDLE ? 1 : 2);
-        (void)sidebar_button(&a->sb, ev->button.x, ev->button.y, sbtn, ev->button.down, ev->button.clicks);
+        (void)sidebar_button(&a->sb, ev->button.x, ev->button.y, sbtn, ev->button.down, ev->button.clicks,
+                             ev->button.mods);
         if (sidebar_take_layout_change(&a->sb)) {
             relayout(a);
         }
@@ -1729,7 +1935,34 @@ static void handle_event(app *a, const te_event *ev)
     case TE_EV_MOUSE_WHEEL:  on_wheel(a, ev); break;
     case TE_EV_MOUSE_BUTTON: on_button(a, ev); break;
     case TE_EV_MOUSE_MOTION: on_motion(a, ev); break;
+    case TE_EV_DROP:
+        if (ev->drop.path != nullptr) {
+            te_pane *fp = focus_pane(a);
+            if (fp != nullptr && fp->sess != nullptr && fp->sess->s.type == TE_SESS_SSH) {
+                if (!(a->sb.visible && a->sb.tab == TE_SB_FILES)) {
+                    sidebar_show_tab(&a->sb, TE_SB_FILES);
+                    if (sidebar_take_layout_change(&a->sb)) relayout(a);
+                }
+                update_files(a);
+                files_drop(&a->sb.files, ev->drop.path);
+            } else {
+                show_toast(a, "Drop files onto an SSH session to upload them");
+            }
+            a->need_render = true;
+        }
+        break;
+    case TE_EV_DIALOG:
+        files_dialog_result(&a->sb.files, ev->dialog.request, ev->dialog.paths, ev->dialog.n, ev->dialog.failed,
+                            ev->dialog.error);
+        a->need_render = true;
+        break;
     case TE_EV_FD_READY:
+        for (size_t i = 0; i < MAX_PANES; i++) {
+            if (a->remotes[i].r != nullptr && remote_fd_ready(a->remotes[i].r, ev->fd.tag)) {
+                a->need_render = true;
+                return;
+            }
+        }
         if (ev->fd.tag == a->watch_tag && a->watch_tag >= 0) {
             if (watch_drain(&a->watch)) {
                 a->reload_due_ms = plat_ticks_ms() + RELOAD_DEBOUNCE_MS;
@@ -1958,6 +2191,9 @@ static void app_destroy(app *a)
         }
         pane_destroy(&all[i]);
     }
+    for (size_t i = 0; i < MAX_PANES; i++) {
+        remote_destroy(&a->remotes[i].r);   /* before the platform goes: it unwatches */
+    }
     layout_destroy(&a->layout);
     if (a->sb_ready) {
         sidebar_destroy(&a->sb);
@@ -2025,13 +2261,24 @@ static void run(app *a)
             a->toast_until_ms = 0;
             a->need_render = true;
         }
+        for (size_t i = 0; i < MAX_PANES; i++) {
+            if (a->remotes[i].r != nullptr) {
+                remote_service(a->remotes[i].r);
+                if (remote_busy(a->remotes[i].r)) {
+                    timeout = min_timeout(timeout, 10);
+                }
+            }
+        }
         te_event ev = { 0 };
         if (plat_wait_event(a->plat, &ev, timeout)) {
             handle_event(a, &ev);
+            plat_event_free(&ev);
             while (a->running && plat_wait_event(a->plat, &ev, 0)) {
                 handle_event(a, &ev);
+                plat_event_free(&ev);
             }
         }
+        update_files(a);
         if (!a->running) {
             break;
         }
@@ -2123,9 +2370,16 @@ int main(int argc, char **argv)
         bool have_root = paths_config_dir(cfgdir, sizeof cfgdir) == TE_OK &&
                          str_fmt(root, sizeof root, "%s/sessions", cfgdir) == TE_OK;
         te_sidebar_host sh = { .user = &a, .connect = host_sb_connect, .toast = host_sb_toast, .copy = host_sb_copy };
-        sidebar_init(&a.sb, have_root ? root : nullptr, &sh);
+        te_files_host fh = { .user = &a, .dialog = host_files_dialog, .toast = host_sb_toast, .copy = host_sb_copy };
+        sidebar_init(&a.sb, have_root ? root : nullptr, &sh, &fh);
         sidebar_configure(&a.sb, a.cfg.sidebar_visible, a.cfg.sidebar_right, a.cfg.sidebar_width, true);
         a.sb_ready = true;
+    }
+    apply_files_config(&a);
+    if (a.control_dir[0] != '\0' &&
+        str_fmt(a.edit_root, sizeof a.edit_root, "%s/edit", a.control_dir) == TE_OK &&
+        mkdir(a.edit_root, 0700) != 0 && errno != EEXIST) {
+        a.edit_root[0] = '\0';   /* no private folder: edit-locally is unavailable */
     }
 
     const te_font_metrics *m = font_metrics(a.font);
@@ -2140,6 +2394,7 @@ int main(int argc, char **argv)
     if (first == nullptr) {
         goto out;
     }
+
     if (layout_add_tab(&a.layout, first) != TE_OK) {
         pane_destroy(&first);
         goto out;
@@ -2159,6 +2414,9 @@ int main(int argc, char **argv)
     a.cursor_on = true;
     a.last_input_ms = plat_ticks_ms();
     apply_size(&a);
+    if (a.cli.exec_argv == nullptr) {
+        show_banner(&a, first);   /* sized already; not before a -e command's own output */
+    }
     run(&a);
     /* `-e cmd` passes the command's exit status on. */
     exit_code = a.exit_status;

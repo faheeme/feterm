@@ -16,6 +16,7 @@
 #include "common.h"
 #include "platform/platform.h"
 #include "sessions/store.h"
+#include "ui/files.h"
 #include "ui/form.h"
 #include "ui/menu.h"
 #include "ui/paint.h"
@@ -72,6 +73,9 @@ typedef struct te_sidebar {
     char             form_name[TE_SESS_NAME_MAX + 1];
     te_session       form_session;      /* the session being edited */
 
+    /* The Files tab */
+    te_files         files;
+
     /* Folder list for the dialogs' Folder choice */
     char           (*folder_paths)[TE_SESS_FOLDER_MAX + 1];
     const char     **folder_choices;
@@ -79,7 +83,8 @@ typedef struct te_sidebar {
 } te_sidebar;
 
 /* Loads the session tree from sessions_root. A failure still gives a usable (empty) sidebar. */
-void sidebar_init(te_sidebar *sb, const char *sessions_root, const te_sidebar_host *host);
+void sidebar_init(te_sidebar *sb, const char *sessions_root, const te_sidebar_host *host,
+                  const te_files_host *files_host);
 void sidebar_destroy(te_sidebar *sb);
 /* Apply [sidebar] settings. visible is only taken at startup (first_time). */
 void sidebar_configure(te_sidebar *sb, bool visible, bool right, float width_logical, bool first_time);
@@ -96,7 +101,7 @@ bool sidebar_on_edge(const te_sidebar *sb, float x, float y);
 bool sidebar_focused(const te_sidebar *sb);
 
 /* Input. Each returns true if the sidebar used the event. button: 0 left, 1 middle, 2 right. */
-bool sidebar_button(te_sidebar *sb, float x, float y, int button, bool down, uint8_t clicks);
+bool sidebar_button(te_sidebar *sb, float x, float y, int button, bool down, uint8_t clicks, uint32_t mods);
 bool sidebar_motion(te_sidebar *sb, float x, float y, bool left_down);
 bool sidebar_wheel(te_sidebar *sb, float x, float y, float dy);
 bool sidebar_key(te_sidebar *sb, te_key key, uint32_t cp, uint32_t mods);

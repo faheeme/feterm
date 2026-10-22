@@ -22,6 +22,7 @@ void config_defaults(te_config *c)
     (void)str_copy(c->term, sizeof c->term, "xterm-256color");
     c->scrollback = 10000;
     c->bold_is_bright = false;
+    c->banner = true;
     c->bell = TE_BELL_VISUAL;
     c->cursor_shape = TE_CURSOR_BLOCK;
     c->cursor_blink = true;
@@ -37,6 +38,9 @@ void config_defaults(te_config *c)
     c->anti_idle_bytes[0] = 0;   /* a NUL byte: counts as activity, prints nothing */
     c->anti_idle_len = 1;
     c->reconnect = TE_RECONNECT_ASK;
+    (void)str_copy(c->download_dir, sizeof c->download_dir, "~/Downloads");
+    c->follow_terminal = true;
+    c->editor[0] = '\0';
     (void)str_copy(c->hl_mode, sizeof c->hl_mode, "auto");
     (void)str_copy(c->hl_fallback, sizeof c->hl_fallback, "network-common");
     c->hl_alt_screen = false;
@@ -128,6 +132,8 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
             if (str_to_long(value, 0, 1000000, &l)) c->scrollback = (uint32_t)l; else BAD("scrollback");
         } else if (strcmp(key, "bold_is_bright") == 0) {
             if (str_to_bool(value, &b)) c->bold_is_bright = b; else BAD("boolean");
+        } else if (strcmp(key, "banner") == 0) {
+            if (str_to_bool(value, &b)) c->banner = b; else BAD("boolean");
         } else if (strcmp(key, "bell") == 0) {
             if (strcmp(value, "none") == 0) c->bell = TE_BELL_NONE;
             else if (strcmp(value, "visual") == 0) c->bell = TE_BELL_VISUAL;
@@ -219,6 +225,17 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
             else BAD("reconnect (ask|auto|never)");
         } else {
             LOG_W("%s:%u: unknown key [sessions] %s", path, line, key);
+        }
+    } else if (strcmp(sec, "files") == 0) {
+        if (strcmp(key, "download_dir") == 0) {
+            set_str(c->download_dir, sizeof c->download_dir, value, path, line);
+        } else if (strcmp(key, "follow_terminal") == 0) {
+            if (str_to_bool(value, &b)) c->follow_terminal = b; else BAD("boolean");
+        } else if (strcmp(key, "editor") == 0) {
+            if (value[0] == '-') BAD("editor (a program name or path)");
+            else set_str(c->editor, sizeof c->editor, value, path, line);
+        } else {
+            LOG_W("%s:%u: unknown key [files] %s", path, line, key);
         }
     } else if (strcmp(sec, "keys") == 0) {
         te_err krc = keymap_set(&c->keys, key, value);

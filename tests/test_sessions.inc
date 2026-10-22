@@ -445,16 +445,16 @@ static void test_sidebar_rules(void)
 
     static te_sidebar sb;
     te_sidebar_host host = { .connect = sb_connect };
-    sidebar_init(&sb, sroot, &host);
+    sidebar_init(&sb, sroot, &host, nullptr);
     te_painter p = { .cell_w = 8.0f, .cell_h = 16.0f, .scale = 1.0f, .rect = count_rect, .text = count_text };
     sidebar_configure(&sb, true, false, 280.0f, true);
     sidebar_layout(&sb, &p, 1200.0f, 700.0f);
     CHECK(sb.nvis == 2 && sidebar_width(&sb) == 280.0f && sidebar_term_x(&sb) == 280.0f);
 
     float row0 = 16.0f * 1.6f + 16.0f * 1.8f + 16.0f * 0.7f;   /* inside the first tree row */
-    CHECK(sidebar_button(&sb, 50.0f, row0, 2, true, 1));
+    CHECK(sidebar_button(&sb, 50.0f, row0, 2, true, 1, 0));
     CHECK(sb.menu.open && sb.sel >= 0 && g_connects == 0);
-    CHECK(sidebar_button(&sb, 900.0f, 600.0f, 0, true, 1));   /* click outside: just closes */
+    CHECK(sidebar_button(&sb, 900.0f, 600.0f, 0, true, 1, 0));   /* click outside: just closes */
     CHECK(!sb.menu.open && !sb.form.open && sb.store.len == 2);
 
     sb.focused = true;

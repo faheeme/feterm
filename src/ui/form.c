@@ -10,6 +10,7 @@
 
 void form_init(te_form *f, int purpose, const char *title, const char *ok_label)
 {
+    form_wipe(f);   /* a previous dialog may have held a password */
     memset(f, 0, sizeof *f);
     f->purpose = purpose;
     (void)str_copy(f->title, sizeof f->title, title != nullptr ? title : "");
@@ -85,6 +86,14 @@ void form_focus_first(te_form *f)
         }
     }
     f->focus = (int)f->n;   /* no fields: the OK button */
+}
+
+void form_wipe(te_form *f)
+{
+    for (size_t i = 0; i < f->n; i++) {
+        explicit_bzero(f->f[i].value, sizeof f->f[i].value);
+        f->f[i].cursor = 0;
+    }
 }
 
 void form_set_error(te_form *f, const char *msg)
@@ -229,7 +238,7 @@ te_form_result form_key(te_form *f, te_key key, uint32_t mods)
         return TE_FORM_NONE;
     }
     te_form_field *fl = f->focus >= 0 && (size_t)f->focus < f->n ? &f->f[f->focus] : nullptr;
-    bool text = fl != nullptr && (fl->kind == TE_FIELD_TEXT || fl->kind == TE_FIELD_NUMBER);
+    bool text = fl != nullptr && (fl->kind == TE_FIELD_TEXT || fl->kind == TE_FIELD_NUMBER || fl->kind == TE_FIELD_SECRET);
     switch (key) {
     case TE_KEY_ESCAPE:
         f->open = false;
@@ -320,21 +329,35 @@ static size_t label_cols(const te_form *f)
     return m;
 }
 
+/* Where the next wrapped line of msg ends (bytes), using the same rule as drawing. */
+static size_t wrap_take(const char *s, size_t cols)
+{
+    size_t nl = strcspn(s, "\n");
+    size_t fit = ui_text_fit(s, cols);
+    if (fit < nl && s[fit] != ' ') {
+        size_t sp = fit;
+        while (sp > 0 && s[sp] != ' ') sp--;
+        if (sp > 0) fit = sp;   /* break at a space, not inside a word */
+    }
+    size_t take = nl < fit ? nl : fit;
+    if (take == 0 && *s != '\n' && *s != '\0') {
+        take = 1;   /* a character wider than the line: take it anyway */
+    }
+    return take;
+}
+
 /* Number of message lines when wrapped at cols. */
 static size_t wrap_lines(const char *msg, size_t cols)
 {
     if (msg[0] == '\0' || cols == 0) {
         return 0;
     }
-    size_t lines = 1;
-    size_t col = 0;
-    for (const char *s = msg; *s != '\0'; s++) {
-        if (*s == '\n' || col >= cols) {
-            lines++;
-            col = 0;
-            if (*s == '\n') continue;
-        }
-        if (!is_cont(*s)) col++;
+    size_t lines = 0;
+    const char *s = msg;
+    while (*s != '\0') {
+        s += wrap_take(s, cols);
+        if (*s == '\n' || *s == ' ') s++;
+        lines++;
     }
     return lines;
 }
@@ -443,17 +466,12 @@ static void draw_wrapped(const te_painter *p, float x, float y, const char *msg,
     char line[512] = { 0 };
     const char *s = msg;
     while (*s != '\0') {
-        size_t nl = strcspn(s, "\n");
-        size_t fit = ui_text_fit(s, cols);
-        size_t take = nl < fit ? nl : fit;
-        if (take == 0 && *s != '\n') {
-            take = 1;   /* a character wider than the line: draw it anyway */
-        }
+        size_t take = wrap_take(s, cols);
         if (str_copy_n(line, sizeof line, s, take) == TE_OK) {
             ui_text(p, TE_LAYER_OVERLAY, x, y, line, cols, rgb, false);
         }
         s += take;
-        if (*s == '\n') s++;
+        if (*s == '\n' || *s == ' ') s++;
         y += p->cell_h * 1.2f;
     }
 }
@@ -493,6 +511,19 @@ void form_draw(const te_form *f, const te_painter *p, const te_ui_colors *c)
         }
         float tx = fx + p->cell_w * 0.5f;
         switch (fl->kind) {
+        case TE_FIELD_SECRET: {
+            /* One bullet per character, never the text itself. */
+            size_t chars = 0;
+            for (const char *v = fl->value; *v != '\0'; v++) chars += !is_cont(*v);
+            char dots[3 * 64 + 1] = { 0 };
+            size_t shown = TE_MIN(chars, TE_MIN(fcols > 1 ? fcols - 1 : 1, (size_t)64));
+            for (size_t k = 0; k < shown; k++) memcpy(dots + 3 * k, "\xe2\x80\xa2", 3);
+            ui_text(p, TE_LAYER_OVERLAY, tx, ty, dots, fcols, c->fg, false);
+            if (foc) {
+                ui_rect(p, TE_LAYER_OVERLAY, tx + (float)shown * p->cell_w, ty, 2.0f * s, p->cell_h, c->accent, 1.0f);
+            }
+            break;
+        }
         case TE_FIELD_TEXT:
         case TE_FIELD_NUMBER: {
             if (fl->value[0] == '\0' && !foc) {

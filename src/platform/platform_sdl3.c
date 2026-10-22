@@ -27,6 +27,7 @@ struct te_platform {
     SDL_Cursor    *arrow;
     te_pointer     pointer;
     uint32_t       wake_event;     /* registered SDL user event type */
+    uint32_t       dialog_event;   /* file dialog answers */
 
     /* fd watcher thread: polls every armed fd plus a wake pipe */
     SDL_Thread    *thread;
@@ -352,7 +353,8 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
     if (!SDL_GL_SetSwapInterval(1)) {
         LOG_D("vsync unavailable: %s", SDL_GetError());
     }
-    p->wake_event = SDL_RegisterEvents(1);
+    p->wake_event = SDL_RegisterEvents(2);
+    p->dialog_event = p->wake_event != 0 ? p->wake_event + 1 : 0;
     if (p->wake_event == 0) {
         LOG_E("SDL_RegisterEvents: %s", SDL_GetError());
         plat_destroy(&p);
@@ -492,13 +494,116 @@ static bool translate(te_platform *p, const SDL_Event *e, te_event *ev)
         ev->wheel.mods = map_mods(SDL_GetModState());
         return true;
     }
+    case SDL_EVENT_DROP_FILE:
+        ev->type = TE_EV_DROP;
+        ev->drop.path = e->drop.data != nullptr ? str_dup(e->drop.data) : nullptr;
+        ev->drop.x = e->drop.x * dens;
+        ev->drop.y = e->drop.y * dens;
+        return true;
     default:
         if (p->wake_event != 0 && e->type == p->wake_event) {
             ev->type = TE_EV_FD_READY;
             ev->fd.tag = e->user.code;
             return true;
         }
+        if (p->dialog_event != 0 && e->type == p->dialog_event && e->user.data1 != nullptr) {
+            /* The result struct was built on the dialog's thread; hand it over whole. */
+            te_event *res = e->user.data1;
+            *ev = *res;
+            free(res);
+            return true;
+        }
         return false;
+    }
+}
+
+typedef struct dialog_req {
+    uint32_t event_type;
+    int      request;
+} dialog_req;
+
+/* SDL may call this on another thread: it only builds a heap event and posts it. */
+static void SDLCALL dialog_done(void *userdata, const char *const *filelist, int filter)
+{
+    (void)filter;
+    dialog_req *dr = userdata;
+    te_event *ev = te_calloc(1, sizeof *ev);
+    if (ev == nullptr || dr == nullptr) {
+        free(ev);
+        free(dr);
+        return;
+    }
+    ev->type = TE_EV_DIALOG;
+    ev->dialog.request = dr->request;
+    if (filelist == nullptr) {
+        ev->dialog.failed = true;
+        (void)str_copy(ev->dialog.error, sizeof ev->dialog.error, SDL_GetError());
+    } else {
+        size_t n = 0;
+        while (filelist[n] != nullptr && n < 1024) {
+            n++;
+        }
+        if (n > 0) {
+            ev->dialog.paths = te_calloc(n, sizeof *ev->dialog.paths);
+            for (size_t i = 0; ev->dialog.paths != nullptr && i < n; i++) {
+                ev->dialog.paths[i] = str_dup(filelist[i]);
+                if (ev->dialog.paths[i] != nullptr) {
+                    ev->dialog.n++;
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+    SDL_Event se;
+    SDL_zero(se);
+    se.type = dr->event_type;
+    se.user.data1 = ev;
+    free(dr);
+    if (!SDL_PushEvent(&se)) {
+        plat_event_free(ev);
+        free(ev);
+    }
+}
+
+void plat_file_dialog(te_platform *p, te_dialog_kind kind, const char *default_dir, int request)
+{
+    if (p == nullptr || p->dialog_event == 0) {
+        return;
+    }
+    dialog_req *dr = te_calloc(1, sizeof *dr);
+    if (dr == nullptr) {
+        return;
+    }
+    dr->event_type = p->dialog_event;
+    dr->request = request;
+    switch (kind) {
+    case TE_DIALOG_OPEN_FILES:
+        SDL_ShowOpenFileDialog(dialog_done, dr, p->win, nullptr, 0, default_dir, true);
+        break;
+    case TE_DIALOG_OPEN_FOLDERS:
+        SDL_ShowOpenFolderDialog(dialog_done, dr, p->win, default_dir, true);
+        break;
+    case TE_DIALOG_CHOOSE_FOLDER:
+    default:
+        SDL_ShowOpenFolderDialog(dialog_done, dr, p->win, default_dir, false);
+        break;
+    }
+}
+
+void plat_event_free(te_event *ev)
+{
+    if (ev == nullptr) {
+        return;
+    }
+    if (ev->type == TE_EV_DROP) {
+        TE_FREE(ev->drop.path);
+    } else if (ev->type == TE_EV_DIALOG) {
+        for (size_t i = 0; i < ev->dialog.n; i++) {
+            TE_FREE(ev->dialog.paths[i]);
+        }
+        TE_FREE(ev->dialog.paths);
+        ev->dialog.n = 0;
     }
 }
 
@@ -693,4 +798,17 @@ void plat_set_pointer(te_platform *p, te_pointer kind)
     if (c != nullptr && SDL_SetCursor(c)) {
         p->pointer = kind;
     }
+}
+
+bool plat_logo_rgba(int size, const uint8_t **rgba, size_t *len)
+{
+    for (size_t i = 0; i < TE_ARRAY_LEN(te_icons); i++) {
+        if (te_icons[i].size == size && te_icons[i].rgba != nullptr &&
+            te_icons[i].len == (size_t)size * (size_t)size * 4u) {
+            *rgba = te_icons[i].rgba;
+            *len = te_icons[i].len;
+            return true;
+        }
+    }
+    return false;
 }

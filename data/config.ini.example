@@ -52,6 +52,16 @@ anti_idle_string = \0
 ; When a session's connection drops: ask (press Enter to reconnect) | auto | never
 reconnect = ask
 
+[files]
+; Where downloads go (folders are created on demand)
+download_dir = ~/Downloads
+; The Files tab follows the folder of the remote shell. Needs the remote shell to report it
+; (OSC 7), e.g. in ~/.bashrc on the server:
+;   PROMPT_COMMAND='printf "\e]7;file://%s%s\e\\" "$HOSTNAME" "$PWD"'
+follow_terminal = true
+; Program for "Edit locally" (e.g. gedit, code, kate); empty uses your desktop's default
+editor =
+
 [terminal]
 ; Empty: $SHELL, then /etc/passwd, then /bin/sh
 shell =
@@ -59,6 +69,8 @@ term = xterm-256color
 ; Lines, 0..1000000
 scrollback = 10000
 bold_is_bright = false
+; New local shells start with the FeTerm logo, version and author
+banner = true
 ; none | visual | urgent
 bell = visual
 ; Desktop notifications from programs (OSC 9 / 777 / 99), sent with notify-send:

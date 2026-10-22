@@ -647,6 +647,11 @@ static void draw_pill(te_renderer *r, uint32_t pfg, uint32_t pbg, int area_w, in
         return;
     }
     const te_font_metrics *m = font_metrics(r->font);
+    if (((float)n + 2.0f) * cw > (float)area_w && area_w > 0) {
+        size_t fit = (size_t)((float)area_w / cw);
+        n = fit > 3 ? fit - 2 : 1;   /* a narrow area: shorten the message to fit */
+        if (n > 1) cps[n - 1] = 0x2026;
+    }
     float w = ((float)n + 2.0f) * cw;
     float h = ch * 1.6f;
     float x = (float)area_w - w - pad;
@@ -1260,17 +1265,26 @@ void renderer_chrome(te_renderer *r, const te_chrome *c)
         push_rect(&r->deco, (float)c->dividers[i][0], (float)c->dividers[i][1], (float)c->dividers[i][2],
                   (float)c->dividers[i][3], c->divider, 1.0f);
     }
+    /* The paste question and messages sit in the terminal area, never under the sidebar. */
+    float ax = (float)c->area_x;
+    int aw = c->area_w > 0 ? c->area_w : c->win_w;
+    size_t before = r->ov_rects.len;
+    size_t gbefore = r->ov_glyphs.len;
+    float off_y = 0.0f;
     if (c->modal != nullptr && c->modal[0] != '\0') {
-        push_rect(&r->tint, 0.0f, 0.0f, (float)c->win_w, (float)c->win_h, c->dim_bg, 0.6f);
-        draw_pill(r, c->toast_fg, c->toast_bg, c->win_w, c->win_h, c->modal, PILL_CENTER, cw, ch, pad);
+        push_rect(&r->tint, ax, 0.0f, (float)aw, (float)c->win_h, c->dim_bg, 0.6f);
+        draw_pill(r, c->toast_fg, c->toast_bg, aw, c->win_h, c->modal, PILL_CENTER, cw, ch, pad);
     } else if (c->toast != nullptr && c->toast[0] != '\0') {
-        float off = (float)c->tab_bar_h;
-        size_t before = r->ov_rects.len;
-        size_t gbefore = r->ov_glyphs.len;
-        draw_pill(r, c->toast_fg, c->toast_bg, c->win_w, c->win_h, c->toast, PILL_TOP_RIGHT, cw, ch, pad);
-        /* Keep the toast below the tab bar. */
-        for (size_t i = before; i < r->ov_rects.len; i++) ((rect_inst *)r->ov_rects.data)[i].y += off;
-        for (size_t i = gbefore; i < r->ov_glyphs.len; i++) ((glyph_inst *)r->ov_glyphs.data)[i].y += off;
+        draw_pill(r, c->toast_fg, c->toast_bg, aw, c->win_h, c->toast, PILL_TOP_RIGHT, cw, ch, pad);
+        off_y = (float)c->tab_bar_h;   /* below the tab bar */
+    }
+    for (size_t i = before; i < r->ov_rects.len; i++) {
+        ((rect_inst *)r->ov_rects.data)[i].x += ax;
+        ((rect_inst *)r->ov_rects.data)[i].y += off_y;
+    }
+    for (size_t i = gbefore; i < r->ov_glyphs.len; i++) {
+        ((glyph_inst *)r->ov_glyphs.data)[i].x += ax;
+        ((glyph_inst *)r->ov_glyphs.data)[i].y += off_y;
     }
     te_frame f = { 0 };
     flush_vectors(r, &f);

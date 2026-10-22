@@ -18,7 +18,7 @@
 #define TE_FORM_MAX_FIELDS 24
 #define TE_FORM_VALUE_MAX  1024
 
-typedef enum { TE_FIELD_TEXT, TE_FIELD_NUMBER, TE_FIELD_CHOICE, TE_FIELD_CHECK } te_field_kind;
+typedef enum { TE_FIELD_TEXT, TE_FIELD_NUMBER, TE_FIELD_CHOICE, TE_FIELD_CHECK, TE_FIELD_SECRET } te_field_kind;
 
 typedef struct te_form_field {
     int                 id;
@@ -61,6 +61,8 @@ void form_set_choices(te_form_field *fl, const char *const *choices, size_t n, s
 void form_show(te_form *f, int id, bool visible);
 void form_focus_first(te_form *f);
 void form_set_error(te_form *f, const char *msg);
+/* Overwrite every field value (passwords) before the form is reused or closed. */
+void form_wipe(te_form *f);
 
 const char *form_value(const te_form *f, int id);          /* "" if missing */
 size_t form_choice(const te_form *f, int id);

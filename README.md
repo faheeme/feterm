@@ -9,8 +9,8 @@ Juniper and a shared network profile), click-to-position, selection and copy, mo
 reporting, links, scrollback search, reflow, configurable keys, live reload, tabs and split
 panes, the kitty keyboard protocol, desktop notifications, drawn box characters, cursor
 animation, 12 themes, true transparency, and inline images (sixel and kitty graphics).
-The sidebar has a session manager: SSH, Telnet, serial and local sessions in folders, with
-keepalives, anti-idle and reconnect. The remote file explorer is next.
+The sidebar has a session manager (SSH, Telnet, serial and local sessions in folders, with
+keepalives, anti-idle and reconnect) and a remote file explorer (SFTP, with an SCP fallback).
 
 ## Build
 
@@ -74,6 +74,10 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 
 Every shortcut can be changed in the `[keys]` section of `config.ini`.
 
+New local shells start with a small banner: the FeTerm logo, the version and the author.
+Turn it off with `[terminal] banner = false`. The name, author and email come from the
+Makefile (`DISPLAY_NAME`, `AUTHOR`, `EMAIL`).
+
 Programs can send desktop notifications (OSC 9, OSC 777, OSC 99); by default they are
 shown only when you are not looking at that pane, at most one every two seconds, via
 `notify-send`. Images use sixel or the kitty graphics protocol with raw RGB/RGBA data
@@ -122,6 +126,38 @@ or press Ctrl+Shift+B to collapse it to a thin strip.
 
 Sessions are plain files: `~/.config/feterm/sessions/<folder>/<name>.ini` (mode 0600). You
 can back them up, sync them, or edit them by hand.
+
+## Files
+
+The Files tab (Ctrl+Shift+2) browses the focused SSH session's server over SFTP.
+- **Logging in:** it reuses the terminal's login, so there's no second password. If it can't,
+  it asks in a dialog; the answer goes straight to ssh and is wiped from memory.
+- **Right-click:** opens a menu and never acts by itself.
+  - On a file: Download, Download to..., Edit locally, Rename, Copy path, Permissions,
+    Properties and Delete.
+  - On a folder: Open, Download folder (recursive), Rename, Delete (recursive, after asking).
+  - On empty space: Upload files, Upload folder, New folder, Refresh, Show hidden files, Go to
+    folder and Home.
+  - Ctrl+click and Shift+click select several items.
+- **Keyboard:** Enter opens a folder or downloads a file, Backspace goes up, F2 renames, F5
+  refreshes, Delete deletes (after asking) and Shift+F10 opens the menu.
+- **Uploading:** drag files from your desktop onto the window, or use Upload files.... If a
+  name already exists, you're asked whether to keep both (adding a number), replace or skip.
+- **Downloads:** they go to `[files] download_dir` (default `~/Downloads`). Each one is written
+  to a hidden temporary file and renamed when complete, and an existing file is never replaced
+  unless you chose that.
+- **Transfers:** shown at the bottom of the tab with progress. Right-click there to cancel,
+  retry or clear them.
+- **Edit locally:** downloads the file to a private folder, opens it in `[files] editor` (or
+  your desktop's default), and uploads it again every time you save.
+- **Follow terminal folder** (the ⇵ button): the tab follows the folder of the remote shell.
+  The server's shell has to report it, which takes one line in `~/.bashrc` (see
+  `config.ini.example`).
+- **No SFTP** (e.g. Cisco IOS): the tab offers Upload a file / Download a file using
+  `scp -O`, the classic protocol those devices speak.
+
+File dialogs use xdg-desktop-portal, or zenity if there's no portal (tiling window managers),
+so install one of them. Drag and drop works either way.
 
 ## Transparency
 

@@ -8,5 +8,7 @@
 #define APP_VERSION       "@VERSION@"
 #define APP_ID            "@APP_ID@"
 #define APP_DATADIR       "@DATADIR@"
+#define APP_AUTHOR        "@AUTHOR@"
+#define APP_EMAIL         "@EMAIL@"
 
 #endif

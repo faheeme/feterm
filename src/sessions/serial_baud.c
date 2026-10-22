@@ -11,7 +11,7 @@ int serial_set_custom_baud(int fd, uint32_t baud);
 
 int serial_set_custom_baud(int fd, uint32_t baud)
 {
-    struct termios2 t;
+    struct termios2 t = { 0 };
     if (ioctl(fd, TCGETS2, &t) != 0) {
         return -1;
     }

@@ -66,7 +66,7 @@ static void explain_open_error(const char *dev, int err)
 
 static bool configure(int fd, const te_serial_cfg *c)
 {
-    struct termios t;
+    struct termios t = { 0 };
     memset(&t, 0, sizeof t);
     if (tcgetattr(fd, &t) != 0) {
         return false;

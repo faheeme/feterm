@@ -1816,6 +1816,13 @@ static void place_image(te_term *t, te_image *im, uint16_t cols, uint16_t rows, 
         }
     }
     if (!move_cursor) {
+        /* kitty C=1: the cursor stays where the image starts. Making room above
+         * moved it to the last row (scrolling if needed), so go back up. */
+        uint16_t up = (uint16_t)(r - 1u);
+        t->cur.y = t->cur.y >= up ? (uint16_t)(t->cur.y - up) : 0;
+        t->cur.x = x0;
+        t->cur.pending_wrap = false;
+        t->dirty = true;
         return;
     }
     if (kitty) {
@@ -2204,6 +2211,8 @@ static te_err reflow_main(te_term *t, uint16_t cols, uint16_t rows, uint16_t *cx
     }
 
     rf_out o = { .lines = nullptr, .n = 0, .cap = 0, .cols = cols };
+    /* Where each source row's first cell lands, so inline images follow their text. */
+    size_t *rowmap = te_calloc(limit > 0 ? limit : 1, sizeof *rowmap);
     size_t new_cy_line = 0;
     uint16_t new_cx = 0;
     bool cursor_set_flag = false;
@@ -2233,6 +2242,9 @@ static te_err reflow_main(te_term *t, uint16_t cols, uint16_t rows, uint16_t *cx
             if (src->input_col != 0) {
                 input_off = seg_start + (uint32_t)(src->input_col - 1u);
             }
+            if (rowmap != nullptr) {
+                rowmap[k] = o.n - 1;
+            }
             for (uint16_t sx = 0; sx < len; sx++) {
                 const te_cell *c = &src->cells[sx];
                 bool wide = (c->attrs & TE_ATTR_WIDE) != 0;
@@ -2243,6 +2255,9 @@ static te_err reflow_main(te_term *t, uint16_t cols, uint16_t rows, uint16_t *cx
                         goto fail;
                     }
                     x = 0;
+                }
+                if (sx == 0 && rowmap != nullptr) {
+                    rowmap[k] = o.n - 1;   /* the segment starts on a new output line */
                 }
                 if (logical == cursor_off) {
                     new_cy_line = o.n - 1;
@@ -2310,6 +2325,7 @@ static te_err reflow_main(te_term *t, uint16_t cols, uint16_t rows, uint16_t *cx
 
     /* Commit: replace scrollback and the main grid. Nothing below can fail. */
     uint64_t base = t->sb_base;
+    size_t out_lines = o.n;
     for (uint32_t i = 0; i < t->sb_cap; i++) {
         line_free(&t->sb[i]);
     }
@@ -2338,9 +2354,28 @@ static te_err reflow_main(te_term *t, uint16_t cols, uint16_t rows, uint16_t *cx
     *cy = (uint16_t)(new_cy_line - grid_start);
     *cx = new_cx < cols ? new_cx : (uint16_t)(cols - 1);
     t->view_offset = 0;
+    /* Move main-screen images to the rows their text went to. */
+    for (size_t i = 0; i < t->img.n; i++) {
+        te_image *im = &t->img.items[i];
+        if (!im->placed || im->alt) {
+            continue;
+        }
+        if (rowmap == nullptr || im->row < base || im->col >= cols) {
+            im->placed = false;   /* cannot follow its text: hide it */
+            continue;
+        }
+        uint64_t k = im->row - base;
+        im->row = base + (k < limit ? (uint64_t)rowmap[k] : (uint64_t)out_lines + (k - limit));
+        if ((uint32_t)im->col + im->cols > cols) {
+            im->cols = (uint16_t)(cols - im->col);
+        }
+    }
+    images_prune(&t->img, t->sb_base);
+    TE_FREE(rowmap);
     return TE_OK;
 
 fail:
+    TE_FREE(rowmap);
     rf_free(&o);
     return TE_ERR_NOMEM;
 }
@@ -2366,8 +2401,7 @@ te_err term_resize(te_term *t, uint16_t cols, uint16_t rows)
     uint16_t main_x = t->grid == &t->main ? t->cur.x : t->saved_main.x;
     te_err r1 = TE_ERR_NOMEM;
     if (cols != old_cols) {
-        images_drop_screen(&t->img, false);   /* re-wrapped text no longer lines up with images */
-        r1 = reflow_main(t, cols, rows, &main_x, &main_y);
+        r1 = reflow_main(t, cols, rows, &main_x, &main_y);   /* images move with their rows */
         if (r1 == TE_OK) {
             if (t->grid == &t->main) {
                 t->cur.x = main_x;
@@ -2376,6 +2410,7 @@ te_err term_resize(te_term *t, uint16_t cols, uint16_t rows)
             }
         } else {
             LOG_W("reflow failed (%s); resizing without re-wrapping", te_strerror(r1));
+            images_drop_screen(&t->img, false);   /* without re-wrapping, images would no longer line up */
         }
     }
     t->cols = cols;    /* sb_push sizes replacement buffers by t->cols */

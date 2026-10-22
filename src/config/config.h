@@ -30,6 +30,7 @@ typedef struct te_config {
     char            term[64];
     uint32_t        scrollback;       /* lines */
     bool            bold_is_bright;
+    bool            banner;           /* logo, version and author at the top of new local shells */
     te_bell_mode    bell;
     te_notify_mode  notifications;    /* OSC 9 / 777 / 99 desktop notifications */
     /* [cursor] */
@@ -55,6 +56,10 @@ typedef struct te_config {
     uint8_t         anti_idle_bytes[16];
     size_t          anti_idle_len;
     te_reconnect_mode reconnect;
+    /* [files] */
+    char            download_dir[1024]; /* may start with ~/ */
+    bool            follow_terminal;  /* the Files tab follows the remote shell's folder (OSC 7) */
+    char            editor[1024];     /* program for "Edit locally"; empty: xdg-open */
     /* [keys] */
     te_keymap       keys;
     /* [security] */

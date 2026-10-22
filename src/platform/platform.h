@@ -35,6 +35,8 @@ typedef enum te_event_type {
     TE_EV_MOUSE_MOTION,
     TE_EV_MOUSE_WHEEL,
     TE_EV_FD_READY,       /* a watched file descriptor is readable (.fd.tag says which) */
+    TE_EV_DROP,           /* a file dragged from the desktop was dropped (.drop; free with plat_event_free) */
+    TE_EV_DIALOG,         /* a file dialog finished (.dialog; free with plat_event_free) */
 } te_event_type;
 
 typedef struct te_event {
@@ -48,6 +50,8 @@ typedef struct te_event {
         struct { float x, y; uint32_t buttons; uint32_t mods; } motion; /* physical pixels */
         struct { float x, y; float dy; uint32_t mods; } wheel;
         struct { int tag; } fd;
+        struct { char *path; float x, y; } drop;                 /* path: heap, may be nullptr */
+        struct { int request; char **paths; size_t n; bool failed; char error[160]; } dialog;   /* n == 0: cancelled */
     };
 } te_event;
 
@@ -95,6 +99,18 @@ void plat_fd_rearm(te_platform *p, int tag);
 void plat_unwatch_fd(te_platform *p, int tag);
 
 typedef enum { TE_POINTER_TEXT, TE_POINTER_HAND, TE_POINTER_DEFAULT } te_pointer;
+
+/*
+ * Native file dialogs (xdg-desktop-portal, or zenity as a fallback). The answer
+ * arrives later as a TE_EV_DIALOG event carrying request.
+ */
+typedef enum { TE_DIALOG_OPEN_FILES, TE_DIALOG_OPEN_FOLDERS, TE_DIALOG_CHOOSE_FOLDER } te_dialog_kind;
+void plat_file_dialog(te_platform *p, te_dialog_kind kind, const char *default_dir, int request);
+/* The app logo as raw RGBA (size x size x 4 bytes, straight alpha); false if that size is not built in. */
+[[nodiscard]] bool plat_logo_rgba(int size, const uint8_t **rgba, size_t *len);
+
+/* Free what a TE_EV_DROP or TE_EV_DIALOG event owns (safe on any event). */
+void plat_event_free(te_event *ev);
 void plat_set_pointer(te_platform *p, te_pointer kind);
 
 #endif

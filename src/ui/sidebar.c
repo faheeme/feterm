@@ -122,6 +122,8 @@ void sidebar_layout(te_sidebar *sb, const te_painter *p, float win_w, float win_
     if (sb->form.open) {
         form_layout(&sb->form, p, win_w, win_h);
     }
+    float hh = (float)(int)(sb->cell_h * 1.6f + 0.5f);
+    files_layout(&sb->files, p, sb->x, hh, sb->w - sb->scale, win_h - hh, win_w, win_h);
 }
 
 /* Dialog geometry is needed for clicks as soon as a dialog opens. */
@@ -199,7 +201,7 @@ static void key_of(const te_sidebar *sb, int i, char *out, size_t outsz)
 
 static int find_key(const te_sidebar *sb, const char *key)
 {
-    char k[sizeof sb->sel_key];
+    char k[sizeof sb->sel_key] = { 0 };
     for (size_t i = 0; i < sb->store.len; i++) {
         key_of(sb, (int)i, k, sizeof k);
         if (strcmp(k, key) == 0) {
@@ -363,7 +365,8 @@ static void after_store_change(te_sidebar *sb)
 /* ------------------------------------------------------------------------- */
 /* Lifecycle */
 
-void sidebar_init(te_sidebar *sb, const char *sessions_root, const te_sidebar_host *host)
+void sidebar_init(te_sidebar *sb, const char *sessions_root, const te_sidebar_host *host,
+                  const te_files_host *files_host)
 {
     memset(sb, 0, sizeof *sb);
     sb->host = *host;
@@ -379,6 +382,8 @@ void sidebar_init(te_sidebar *sb, const char *sessions_root, const te_sidebar_ho
     sb->cell_h = 16.0f;
     sb->scale = 1.0f;
     init_baud_choices();
+    te_files_host none = { 0 };
+    files_init(&sb->files, &sb->menu, &sb->form, files_host != nullptr ? files_host : &none);
     sb->store_ok = sessions_root != nullptr && store_open(&sb->store, sessions_root) == TE_OK;
     if (!sb->store_ok) {
         LOG_W("sessions folder unavailable; the session manager is read-only and empty");
@@ -389,6 +394,7 @@ void sidebar_init(te_sidebar *sb, const char *sessions_root, const te_sidebar_ho
 
 void sidebar_destroy(te_sidebar *sb)
 {
+    files_destroy(&sb->files);
     store_close(&sb->store);
     TE_FREE(sb->vis);
     sb->nvis = 0;
@@ -705,14 +711,14 @@ static void connect_node(te_sidebar *sb, int idx, bool split)
         toast(sb, msg);
         return;
     }
-    te_session_eff eff;
+    te_session_eff eff = { 0 };
     store_effective(&sb->store, n->sess, &eff);
     sb->host.connect(sb->host.user, n->sess, &eff, split);
 }
 
 static void new_session_in(te_sidebar *sb, const char *folder)
 {
-    te_session s;
+    te_session s = { 0 };
     session_defaults(&s, TE_SESS_SSH);
     (void)str_copy(s.folder, sizeof s.folder, folder);
     open_session_form(sb, F_SESSION_NEW, &s, "New session");
@@ -720,6 +726,11 @@ static void new_session_in(te_sidebar *sb, const char *folder)
 
 static void run_menu(te_sidebar *sb, int id)
 {
+    if (id >= TE_FILES_MENU_BASE) {
+        files_menu(&sb->files, id);
+        relayout_form(sb);
+        return;
+    }
     const te_store_node *n = node(sb, sb->menu_node);
     const char *here = n != nullptr ? n->path : "";
     switch (id) {
@@ -939,12 +950,16 @@ bool quick_parse(te_sess_type type, const char *target, te_session *out)
 static void submit_form(te_sidebar *sb)
 {
     te_form *f = &sb->form;
+    if (f->purpose >= TE_FILES_MENU_BASE) {
+        files_submit(&sb->files);
+        return;
+    }
     te_err rc = TE_OK;
     char msg[200] = { 0 };
     switch (f->purpose) {
     case F_SESSION_NEW:
     case F_SESSION_EDIT: {
-        te_session s;
+        te_session s = { 0 };
         if (!session_from_form(sb, &s)) {
             return;
         }
@@ -1015,7 +1030,7 @@ static void submit_form(te_sidebar *sb)
         break;
     }
     case F_FOLDER_SETTINGS: {
-        te_folder_defaults d;
+        te_folder_defaults d = { 0 };
         folder_defaults_init(&d);
         d.color = color_from_choice(form_choice(f, FD_COLOR));
         const char *ai = form_value(f, FD_ANTI_IDLE);
@@ -1071,7 +1086,7 @@ static void submit_form(te_sidebar *sb)
     case F_QUICK: {
         static const te_sess_type map[] = { TE_SESS_SSH, TE_SESS_TELNET, TE_SESS_SERIAL };
         size_t t = TE_MIN(form_choice(f, FD_TYPE), TE_ARRAY_LEN(map) - 1);
-        te_session s;
+        te_session s = { 0 };
         if (!quick_parse(map[t], form_value(f, FD_TARGET), &s)) {
             form_set_error(f, map[t] == TE_SESS_SERIAL ? "Use a device like /dev/ttyUSB0, optionally ,115200,8N1,none"
                                                        : "Use host, host:port or user@host:port");
@@ -1086,7 +1101,7 @@ static void submit_form(te_sidebar *sb)
             after_store_change(sb);
         }
         if (sb->host.connect != nullptr) {
-            te_session_eff eff;
+            te_session_eff eff = { 0 };
             store_effective(&sb->store, &s, &eff);
             sb->host.connect(sb->host.user, &s, &eff, false);
         }
@@ -1104,6 +1119,8 @@ static void handle_form_result(te_sidebar *sb, te_form_result r)
         submit_form(sb);
     } else if (r == TE_FORM_CHANGED) {
         update_session_form(sb);
+    } else if (r == TE_FORM_CANCEL && sb->form.purpose >= TE_FILES_MENU_BASE) {
+        files_cancel(&sb->files);   /* e.g. answer "cancel" to a login question */
     }
     relayout_form(sb);   /* fields may have appeared or an error line been added */
 }
@@ -1113,7 +1130,7 @@ static void handle_form_result(te_sidebar *sb, te_form_result r)
 
 static void open_menu(te_sidebar *sb, int idx, float x, float y, const te_painter *p)
 {
-    te_menu_item items[TE_MENU_MAX_ITEMS];
+    te_menu_item items[TE_MENU_MAX_ITEMS] = { 0 };
     size_t n = 0;
     const te_store_node *nd = node(sb, idx);
     bool rw = sb->store_ok;
@@ -1209,7 +1226,7 @@ static int drop_target_at(const te_sidebar *sb, float x, float y)
     return n->parent;
 }
 
-bool sidebar_button(te_sidebar *sb, float x, float y, int button, bool down, uint8_t clicks)
+bool sidebar_button(te_sidebar *sb, float x, float y, int button, bool down, uint8_t clicks, uint32_t mods)
 {
     te_painter p = metrics(sb);
     sb->mouse_x = x;
@@ -1292,7 +1309,9 @@ bool sidebar_button(te_sidebar *sb, float x, float y, int button, bool down, uin
         }
         return true;
     }
-    if (sb->tab != TE_SB_SESSIONS) {
+    if (sb->tab == TE_SB_FILES) {
+        (void)files_button(&sb->files, x, y, button, down, clicks, mods);
+        relayout_form(sb);
         return true;
     }
     if (y < tree_top(sb)) {
@@ -1371,6 +1390,9 @@ bool sidebar_motion(te_sidebar *sb, float x, float y, bool left_down)
         }
         return true;
     }
+    if (sb->visible && sb->tab == TE_SB_FILES) {
+        files_motion(&sb->files, x, sidebar_contains(sb, x, y) ? y : -1.0f);
+    }
     int h = sidebar_contains(sb, x, y) && sb->visible && sb->tab == TE_SB_SESSIONS ? node_at(sb, x, y) : -1;
     sb->hover = h;
     return sidebar_contains(sb, x, y);
@@ -1383,6 +1405,9 @@ bool sidebar_wheel(te_sidebar *sb, float x, float y, float dy)
     }
     if (!sidebar_contains(sb, x, y)) {
         return false;
+    }
+    if (sb->tab == TE_SB_FILES) {
+        return files_wheel(&sb->files, dy);
     }
     size_t fit = rows_fit(sb);
     size_t max = sb->nvis > fit ? sb->nvis - fit : 0;
@@ -1425,8 +1450,16 @@ bool sidebar_key(te_sidebar *sb, te_key key, uint32_t cp, uint32_t mods)
     if (!sb->focused || !sb->visible) {
         return false;
     }
-    if ((mods & (TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER)) != 0) {
-        return false;   /* shortcuts stay with the application */
+    /* Application shortcuts were matched before this; everything else stays here
+     * while the sidebar has the keyboard, so nothing leaks into the shell. */
+    if (sb->tab == TE_SB_FILES) {
+        if (key == TE_KEY_ESCAPE) {
+            sb->focused = false;
+            return true;
+        }
+        (void)files_key(&sb->files, key, mods);
+        relayout_form(sb);
+        return true;
     }
     const te_store_node *n = node(sb, sb->sel);
     switch (key) {
@@ -1558,15 +1591,9 @@ static void draw_collapsed(const te_sidebar *sb, const te_painter *p, const te_u
     float ex = sb->right ? sb->x : sb->x + sb->w - p->scale;
     ui_rect(p, TE_LAYER_BASE, ex, 0.0f, p->scale, sb->win_h, c->border, 1.0f);
     float cx = sb->x + (sb->w - p->cell_w) / 2.0f;
-    ui_text(p, TE_LAYER_BASE, cx, p->cell_h * 0.3f, sb->right ? "\xc2\xab" : "\xc2\xbb", 1, c->accent, true);   /* « » */
-    /* The tab names, one letter per line. */
-    const char *word = "SESSIONS";
-    float y = p->cell_h * 2.0f;
-    for (const char *s = word; *s != '\0' && y < sb->win_h - p->cell_h; s++) {
-        char ch[2] = { *s, '\0' };
-        ui_text(p, TE_LAYER_BASE, cx, y, ch, 1, sb->tab == TE_SB_SESSIONS ? c->fg : c->muted, false);
-        y += p->cell_h;
-    }
+    bool hot = sidebar_contains(sb, sb->mouse_x, sb->mouse_y);
+    ui_text(p, TE_LAYER_BASE, cx, p->cell_h * 0.3f, sb->right ? "\xc2\xab" : "\xc2\xbb", 1,
+            hot ? c->fg : c->accent, true);   /* « » : click anywhere on the strip to open the sidebar */
 }
 
 static void draw_header(const te_sidebar *sb, const te_painter *p, const te_ui_colors *c)
@@ -1659,7 +1686,7 @@ static void draw_sessions(const te_sidebar *sb, const te_painter *p, const te_ui
             }
             ui_text(p, TE_LAYER_BASE, x + p->cell_w * 2.0f, tyy, n->name, room > 2 ? room - 2 : 1, fg, true);
         } else {
-            te_session_eff eff;
+            te_session_eff eff = { 0 };
             if (n->sess != nullptr) {
                 store_effective(&sb->store, n->sess, &eff);
             } else {
@@ -1700,25 +1727,6 @@ static void draw_sessions(const te_sidebar *sb, const te_painter *p, const te_ui
     }
 }
 
-static void draw_files(const te_sidebar *sb, const te_painter *p, const te_ui_colors *c)
-{
-    size_t cols = sb->w / p->cell_w > 3.0f ? (size_t)(sb->w / p->cell_w) - 2 : 1;
-    float y = header_h(sb) + p->cell_h;
-    ui_text(p, TE_LAYER_BASE, sb->x + p->cell_w, y, "Remote files", cols, c->fg, true);
-    y += p->cell_h * 1.6f;
-    static const char *const lines[] = {
-        "Browse, download and upload files",
-        "of the active SSH session here.",
-        "",
-        "The file explorer arrives in the",
-        "next FeTerm update (0.4).",
-    };
-    for (size_t i = 0; i < TE_ARRAY_LEN(lines); i++) {
-        ui_text(p, TE_LAYER_BASE, sb->x + p->cell_w, y, lines[i], cols, c->muted, false);
-        y += p->cell_h * 1.2f;
-    }
-}
-
 void sidebar_draw(const te_sidebar *sb, const te_painter *p, const te_ui_colors *c)
 {
     if (sb->w <= 0.0f) {
@@ -1732,7 +1740,7 @@ void sidebar_draw(const te_sidebar *sb, const te_painter *p, const te_ui_colors 
         if (sb->tab == TE_SB_SESSIONS) {
             draw_sessions(sb, p, c);
         } else {
-            draw_files(sb, p, c);
+            files_draw(&sb->files, p, c);
         }
         float ex = sb->right ? sb->x : sb->x + sb->w - p->scale;
         ui_rect(p, TE_LAYER_BASE, ex, 0.0f, p->scale, sb->win_h, sb->resizing ? c->accent : c->border, 1.0f);

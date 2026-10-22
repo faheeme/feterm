@@ -6,7 +6,9 @@
 # ---------------------------------------------------------------------------
 NAME       ?= feterm
 DISPLAY_NAME ?= FeTerm
-VERSION    ?= 0.3.0
+AUTHOR     ?= Faheem Essack
+EMAIL      ?= faheem.essack@gmail.com
+VERSION    ?= 0.4.0
 APP_ID     ?= io.github.$(NAME)
 PREFIX     ?= /usr/local
 DATADIR    ?= $(PREFIX)/share/$(NAME)
@@ -42,7 +44,8 @@ all: $(NAME) $(BUILD)/$(APP_ID).desktop
 $(GEN)/app_name.h: src/app_name.h.in Makefile
 	@mkdir -p $(@D)
 	sed -e 's|@NAME@|$(NAME)|g' -e 's|@DISPLAY_NAME@|$(DISPLAY_NAME)|g' -e 's|@VERSION@|$(VERSION)|g' \
-	    -e 's|@APP_ID@|$(APP_ID)|g' -e 's|@DATADIR@|$(DATADIR)|g' $< > $@
+	    -e 's|@APP_ID@|$(APP_ID)|g' -e 's|@DATADIR@|$(DATADIR)|g' \
+	    -e 's|@AUTHOR@|$(AUTHOR)|g' -e 's|@EMAIL@|$(EMAIL)|g' $< > $@
 
 # Launcher entry, named after the app-id so Wayland compositors match the window to it.
 $(BUILD)/$(APP_ID).desktop: data/app.desktop.in Makefile
@@ -57,9 +60,9 @@ $(NAME): $(OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # Headless unit tests for the core, built with ASan + UBSan.
-TEST_SRC := $(wildcard src/util/*.c src/config/*.c src/vt/*.c src/highlight/*.c src/ui/*.c src/sessions/*.c) \
+TEST_SRC := $(wildcard src/util/*.c src/config/*.c src/vt/*.c src/highlight/*.c src/ui/*.c src/sessions/*.c src/remote/*.c) \
             src/input/keys.c src/input/click.c src/input/mouse.c src/input/keybind.c \
-            src/app/layout.c src/render/boxdraw.c tests/test_core.c
+            src/app/layout.c src/app/banner.c src/render/boxdraw.c tests/test_core.c
 TEST_SAN := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
 $(BUILD)/test_core: $(TEST_SRC) $(wildcard tests/*.inc) $(GEN)/app_name.h

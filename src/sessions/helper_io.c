@@ -78,7 +78,7 @@ int helper_signals(void)
 
 int helper_take_signal(int sigfd)
 {
-    struct signalfd_siginfo si;
+    struct signalfd_siginfo si = { 0 };
     memset(&si, 0, sizeof si);
     ssize_t n = read(sigfd, &si, sizeof si);
     if (n != (ssize_t)sizeof si || si.ssi_signo > 64) {

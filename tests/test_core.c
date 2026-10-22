@@ -1352,6 +1352,7 @@ static void test_kitty_graphics(void)
 }
 
 #include "test_sessions.inc"
+#include "test_remote.inc"
 
 int main(void)
 {
@@ -1381,6 +1382,7 @@ int main(void)
     test_sixel();
     test_kitty_graphics();
     test_sessions_all();
+    test_remote_all();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
