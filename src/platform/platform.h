@@ -19,6 +19,7 @@ typedef enum te_key {
     TE_KEY_UP, TE_KEY_DOWN, TE_KEY_LEFT, TE_KEY_RIGHT,
     TE_KEY_F1, TE_KEY_F2, TE_KEY_F3, TE_KEY_F4, TE_KEY_F5, TE_KEY_F6,
     TE_KEY_F7, TE_KEY_F8, TE_KEY_F9, TE_KEY_F10, TE_KEY_F11, TE_KEY_F12,
+    TE_KEY_PAUSE,         /* never sent to programs; bindable (serial Break) */
 } te_key;
 
 typedef enum te_event_type {

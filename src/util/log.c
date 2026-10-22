@@ -56,6 +56,8 @@ const char *te_strerror(te_err e)
     case TE_ERR_FONT:     return "font error";
     case TE_ERR_GL:       return "OpenGL error";
     case TE_ERR_CHILD:    return "child process error";
+    case TE_ERR_EXISTS:   return "already exists";
+    case TE_ERR_PERM:     return "permission denied";
     }
     return "unknown error";
 }

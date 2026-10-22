@@ -23,6 +23,8 @@ typedef enum te_err {
     TE_ERR_FONT,
     TE_ERR_GL,
     TE_ERR_CHILD,
+    TE_ERR_EXISTS,
+    TE_ERR_PERM,
 } te_err;
 
 [[nodiscard]] const char *te_strerror(te_err e);

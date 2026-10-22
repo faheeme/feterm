@@ -7,10 +7,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 #include "app/layout.h"
 #include "app/pane.h"
 #include "config/config.h"
+#include "config/paths.h"
 #include "config/theme.h"
 #include "config/watch.h"
 #include "highlight/highlight.h"
@@ -21,8 +23,13 @@
 #include "platform/platform.h"
 #include "render/font.h"
 #include "render/renderer.h"
+#include "sessions/launch.h"
+#include "sessions/serial.h"
+#include "sessions/telnet.h"
+#include "ui/paint.h"
 #include "ui/search.h"
 #include "ui/selection.h"
+#include "ui/sidebar.h"
 #include "ui/url.h"
 #include "util/log.h"
 #include "util/mem.h"
@@ -40,6 +47,9 @@
 #define MAX_PANES          60u      /* each pane needs one watched fd */
 #define RESIZE_STEP        0.05f
 #define DIVIDER_SLOP       4
+#define RECONNECT_MIN_MS   2000u
+#define RECONNECT_MAX_MS   60000u
+#define STABLE_SESSION_MS  120000u   /* a connection this old resets the reconnect backoff */
 
 typedef struct cli_opts {
     const char *const *exec_argv;   /* points into main's argv (NULL-terminated) */
@@ -108,6 +118,13 @@ typedef struct app {
 
     char          tab_title_buf[TE_MAX_TABS][96];
     const char   *tab_titles[TE_MAX_TABS];
+    uint32_t      tab_colors[TE_MAX_TABS];
+
+    /* Sidebar and sessions */
+    te_sidebar    sb;
+    bool          sb_ready;
+    char          self_exe[TE_PATH_MAX];
+    char          control_dir[TE_PATH_MAX];   /* "" when SSH connection sharing is unavailable */
 } app;
 
 /* ------------------------------------------------------------------------- */
@@ -189,6 +206,10 @@ static void show_toast(app *a, const char *msg)
 static void note_input(app *a)
 {
     a->last_input_ms = plat_ticks_ms();
+    te_pane *f = layout_focus(&a->layout);
+    if (f != nullptr) {
+        f->last_input_ms = a->last_input_ms;   /* anti-idle counts from real typing only */
+    }
     a->cursor_on = true;
     a->need_render = true;
 }
@@ -217,7 +238,16 @@ static void grid_for_rect(const app *a, int w, int h, uint16_t *cols, uint16_t *
 static const char *pane_title(const te_pane *p)
 {
     const char *t = term_title(p->term);
-    return t != nullptr && t[0] != '\0' ? t : "shell";
+    if (t != nullptr && t[0] != '\0') {
+        return t;
+    }
+    return p->sess != nullptr ? p->sess->s.name : "shell";
+}
+
+/* Tab label: a session's name, so tabs stay recognisable whatever the remote prompt sets. */
+static const char *tab_label(const te_pane *p)
+{
+    return p->sess != nullptr ? p->sess->s.name : pane_title(p);
 }
 
 static void update_window_title(app *a)
@@ -228,17 +258,41 @@ static void update_window_title(app *a)
     }
 }
 
+/* The sidebar's place in the window for the current size and font. */
+static void layout_sidebar(app *a)
+{
+    if (!a->sb_ready || a->ren == nullptr) {
+        return;
+    }
+    te_painter p;
+    renderer_painter(a->ren, a->scale, &p);
+    sidebar_layout(&a->sb, &p, (float)a->width, (float)a->height);
+}
+
+/* Horizontal extent of the terminal area (everything but the sidebar). */
+static void term_area(const app *a, int *x, int *w)
+{
+    int sx = a->sb_ready ? (int)sidebar_term_x(&a->sb) : 0;
+    int sw = a->sb_ready ? (int)sidebar_width(&a->sb) : 0;
+    *x = sx;
+    *w = a->width - sw > 1 ? a->width - sw : 1;
+}
+
 /* Recompute pane rectangles and resize every terminal to its new grid. */
 static void relayout(app *a)
 {
+    layout_sidebar(a);
     int bar = tab_bar_height(a);
-    layout_compute(&a->layout, 0, bar, a->width, a->height - bar);
+    int ax = 0;
+    int aw = 0;
+    term_area(a, &ax, &aw);
+    layout_compute(&a->layout, ax, bar, aw, a->height - bar);
     te_pane *all[MAX_PANES] = { 0 };
     size_t n = layout_all_panes(&a->layout, all, TE_ARRAY_LEN(all));
     int pad = padding_px(a);
     for (size_t i = 0; i < n; i++) {
         te_pane *p = all[i];
-        int r[4] = { 0, bar, a->width, a->height - bar };
+        int r[4] = { ax, bar, aw, a->height - bar };
         if (!layout_pane_rect(&a->layout, p, r)) {
             continue;
         }
@@ -480,7 +534,9 @@ static void close_pane(app *a, te_pane *p)
         TE_FREE(a->pending_paste);
         a->modal[0] = '\0';
     }
-    plat_unwatch_fd(a->plat, p->tag);
+    if (p->tag >= 0) {
+        plat_unwatch_fd(a->plat, p->tag);
+    }
     bool empty = layout_remove(&a->layout, p);
     pane_destroy(&p);
     if (empty) {
@@ -527,6 +583,221 @@ static void split(app *a, bool side_by_side)
     }
     relayout(a);
     update_window_title(a);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Sessions */
+
+static void apply_session_highlight(te_pane *p, const te_session *s)
+{
+    if (p->hl == nullptr || s->highlight[0] == '\0' || strcmp(s->highlight, "auto") == 0) {
+        return;   /* the configured default (usually auto-detect) */
+    }
+    te_err rc = strcmp(s->highlight, "off") == 0 ? hl_set_mode(p->hl, TE_HL_OFF, nullptr)
+                                                 : hl_set_mode(p->hl, TE_HL_PINNED, s->highlight);
+    if (rc != TE_OK) {
+        LOG_W("highlight profile '%s' not found; using auto-detection", s->highlight);
+    }
+    (void)hl_take_changed(p->hl);
+}
+
+static void host_sb_toast(void *user, const char *msg)
+{
+    show_toast(user, msg);
+}
+
+static void host_sb_copy(void *user, const char *text)
+{
+    app *a = user;
+    plat_clipboard_set(a->plat, text);
+    show_toast(a, "Copied");
+}
+
+static void host_sb_connect(void *user, const te_session *s, const te_session_eff *eff, bool split_pane)
+{
+    app *a = user;
+    char msg[160] = { 0 };
+    te_pane_session *ps = te_calloc(1, sizeof *ps);
+    if (ps == nullptr) {
+        show_toast(a, "Out of memory");
+        return;
+    }
+    ps->s = *s;
+    ps->eff = *eff;
+    te_launch_opts lo = {
+        .self_exe = a->self_exe[0] != '\0' ? a->self_exe : nullptr,
+        .control_dir = a->control_dir[0] != '\0' ? a->control_dir : nullptr,
+        .keepalive = a->cfg.keepalive,
+    };
+    te_err rc = launch_build(s, eff, &lo, &ps->launch);
+    if (rc != TE_OK) {
+        (void)str_fmt(msg, sizeof msg, "Cannot start %s: %s", s->name, te_strerror(rc));
+        show_toast(a, msg);
+        TE_FREE(ps);
+        return;
+    }
+    const char *const *argv = ps->launch.argc > 0 ? ps->launch.argv : nullptr;
+    te_pane *p = spawn_pane(a, ps->launch.cwd[0] != '\0' ? ps->launch.cwd : nullptr, argv);
+    if (p == nullptr) {
+        TE_FREE(ps);
+        return;
+    }
+    p->sess = ps;   /* the pane owns it now; argv points into it, for reconnecting */
+    ps = nullptr;
+    p->started_ms = plat_ticks_ms();
+    p->last_input_ms = p->started_ms;
+    apply_session_highlight(p, s);
+    te_err lr = split_pane && focus_pane(a) != nullptr ? layout_split(&a->layout, p, true) : layout_add_tab(&a->layout, p);
+    if (lr != TE_OK) {
+        show_toast(a, split_pane ? "Too many panes in this tab" : "Too many tabs");
+        if (p->tag >= 0) {
+            plat_unwatch_fd(a->plat, p->tag);
+        }
+        pane_destroy(&p);
+        return;
+    }
+    sidebar_blur(&a->sb);
+    relayout(a);
+    update_window_title(a);
+}
+
+static void pane_note(te_pane *p, const char *msg)
+{
+    term_feed(p->term, (const uint8_t *)msg, strlen(msg));
+}
+
+static void reconnect_pane(app *a, te_pane *p)
+{
+    if (p == nullptr || p->sess == nullptr || !p->disconnected) {
+        return;
+    }
+    pane_note(p, "\r\n\x1b[2m[Reconnecting...]\x1b[0m\r\n");
+    const te_launch *l = &p->sess->launch;
+    te_err rc = pane_respawn(p, &a->cfg, l->argc > 0 ? l->argv : nullptr, l->cwd[0] != '\0' ? l->cwd : nullptr);
+    if (rc == TE_OK && plat_watch_fd(a->plat, p->pty.master_fd, &p->tag) != TE_OK) {
+        p->tag = -1;
+        rc = TE_ERR_PLATFORM;
+    }
+    if (rc != TE_OK) {
+        char msg[160] = { 0 };
+        (void)str_fmt(msg, sizeof msg, "\x1b[31m[Reconnect failed: %s. Press Enter to try again.]\x1b[0m\r\n",
+                      te_strerror(rc));
+        pane_note(p, msg);
+        p->exited = true;
+        p->reconnect_at_ms = 0;
+        a->need_render = true;
+        return;
+    }
+    p->disconnected = false;
+    p->reconnect_at_ms = 0;
+    p->started_ms = plat_ticks_ms();
+    p->last_input_ms = p->started_ms;
+    a->need_render = true;
+}
+
+/* A session's connection ended with an error: offer (or schedule) a reconnect. */
+static void on_disconnect(app *a, te_pane *p)
+{
+    uint64_t now = plat_ticks_ms();
+    if (now - p->started_ms > STABLE_SESSION_MS) {
+        p->reconnect_tries = 0;
+    }
+    if (p->tag >= 0) {
+        plat_unwatch_fd(a->plat, p->tag);
+        p->tag = -1;
+    }
+    p->disconnected = true;
+    char msg[200] = { 0 };
+    if (a->cfg.reconnect == TE_RECONNECT_AUTO) {
+        uint32_t shift = p->reconnect_tries < 5 ? p->reconnect_tries : 5;
+        uint64_t delay = (uint64_t)RECONNECT_MIN_MS << shift;
+        if (delay > RECONNECT_MAX_MS) {
+            delay = RECONNECT_MAX_MS;
+        }
+        p->reconnect_at_ms = now + delay;
+        p->reconnect_tries++;
+        (void)str_fmt(msg, sizeof msg,
+                      "\r\n\x1b[33m[Connection lost (exit %d). Reconnecting in %u s: Enter to retry now, Esc to stop.]\x1b[0m\r\n",
+                      p->status, (unsigned)(delay / 1000u));
+    } else {
+        p->reconnect_at_ms = 0;
+        (void)str_fmt(msg, sizeof msg,
+                      "\r\n\x1b[33m[Connection lost (exit %d). Press Enter to reconnect, or Ctrl+Shift+W to close.]\x1b[0m\r\n",
+                      p->status);
+    }
+    pane_note(p, msg);
+    a->need_render = true;
+}
+
+/* Keys for a pane whose connection dropped. Returns true if handled. */
+static bool disconnected_key(app *a, te_pane *p, te_key key)
+{
+    if (!p->disconnected) {
+        return false;
+    }
+    if (key == TE_KEY_ENTER) {
+        p->reconnect_tries = 0;
+        reconnect_pane(a, p);
+    } else if (key == TE_KEY_ESCAPE && p->reconnect_at_ms != 0) {
+        p->reconnect_at_ms = 0;
+        pane_note(p, "\x1b[2m[Automatic reconnect stopped. Press Enter to reconnect.]\x1b[0m\r\n");
+        a->need_render = true;
+    }
+    return true;   /* nothing else reaches a dead connection */
+}
+
+/* Keep-awake bytes for sessions the user has not typed into for a while.
+ * Returns the milliseconds until the next one is due, or -1. */
+static int service_anti_idle(app *a, uint64_t now)
+{
+    if (a->cfg.anti_idle_len == 0) {
+        return -1;
+    }
+    int timeout = -1;
+    te_pane *all[MAX_PANES] = { 0 };
+    size_t n = layout_all_panes(&a->layout, all, TE_ARRAY_LEN(all));
+    for (size_t i = 0; i < n; i++) {
+        te_pane *p = all[i];
+        if (p->sess == nullptr || p->exited || p->disconnected) {
+            continue;
+        }
+        int32_t secs = p->sess->eff.anti_idle == TE_ANTI_IDLE_INHERIT ? a->cfg.anti_idle : p->sess->eff.anti_idle;
+        if (secs <= 0) {
+            continue;
+        }
+        uint64_t last = TE_MAX(TE_MAX(p->last_input_ms, p->last_anti_ms), p->started_ms);
+        uint64_t due = last + (uint64_t)secs * 1000u;
+        if (now >= due) {
+            /* Never type into a full-screen program (vim, less, top): there the byte
+             * could mean something, and those programs are not idle sessions. */
+            if (!term_modes(p->term)->alt_screen) {
+                pane_queue(p, a->cfg.anti_idle_bytes, a->cfg.anti_idle_len);
+            }
+            p->last_anti_ms = now;
+            due = now + (uint64_t)secs * 1000u;
+        }
+        uint64_t wait = due - now;
+        int w = wait > (uint64_t)INT32_MAX ? INT32_MAX : (int)wait;
+        timeout = timeout < 0 || w < timeout ? w : timeout;
+    }
+    return timeout;
+}
+
+static void send_break(app *a)
+{
+    te_pane *p = focus_pane(a);
+    if (p == nullptr || p->exited) {
+        return;
+    }
+    te_sess_type t = p->sess != nullptr ? p->sess->s.type : TE_SESS_LOCAL;
+    if ((t == TE_SESS_SERIAL || t == TE_SESS_TELNET) && p->pty.child > 0) {
+        (void)kill(p->pty.child, SIGUSR1);   /* the helper turns this into a Break */
+        show_toast(a, "Break sent");
+    } else if (t == TE_SESS_SSH) {
+        show_toast(a, "SSH: press Enter, then type ~B to send a Break");
+    } else {
+        show_toast(a, "Break is for serial and Telnet sessions");
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -738,6 +1009,10 @@ static void reload_config(app *a)
         pane_setup_highlight(all[i], &a->cfg);
     }
     update_opacity(a);
+    if (a->sb_ready) {
+        sidebar_configure(&a->sb, a->cfg.sidebar_visible, a->cfg.sidebar_right, a->cfg.sidebar_width, false);
+        sidebar_reload(&a->sb);
+    }
     apply_size(a);
     show_toast(a, "Configuration reloaded");
 }
@@ -844,10 +1119,18 @@ static void do_action(app *a, te_action act)
     case TE_ACT_RESIZE_DOWN:      if (layout_resize(&a->layout, 0, 1, RESIZE_STEP)) relayout(a); break;
     case TE_ACT_TOGGLE_ZOOM:      layout_toggle_zoom(&a->layout); relayout(a); break;
     case TE_ACT_THEME_NEXT:       theme_next(a); break;
+    case TE_ACT_TOGGLE_SIDEBAR:   sidebar_toggle(&a->sb); break;
+    case TE_ACT_SIDEBAR_SESSIONS: sidebar_show_tab(&a->sb, TE_SB_SESSIONS); break;
+    case TE_ACT_SIDEBAR_FILES:    sidebar_show_tab(&a->sb, TE_SB_FILES); break;
+    case TE_ACT_QUICK_CONNECT:    layout_sidebar(a); sidebar_quick_connect(&a->sb); break;
+    case TE_ACT_SEND_BREAK:       send_break(a); break;
     case TE_ACT_NONE:
     case TE_ACT_COUNT:
     default:
         break;
+    }
+    if (sidebar_take_layout_change(&a->sb)) {
+        relayout(a);
     }
     a->need_render = true;
 }
@@ -875,6 +1158,41 @@ static void on_key(app *a, const te_event *ev)
         return;
     }
     a->suppress_text = false;
+    uint32_t kmods = ev->key.mods & (TE_MOD_SHIFT | TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER);
+    /* Printable keys without Ctrl/Alt arrive again as text; only those may produce text. */
+    bool printable = ev->key.key == TE_KEY_CHAR && (kmods & (TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER)) == 0;
+    if (sidebar_captures(&a->sb)) {
+        /* A menu or dialog is open: it gets everything (paste goes into the field). */
+        te_action pa = keymap_lookup(&a->cfg.keys, ev->key.key, ev->key.cp, kmods);
+        if (pa == TE_ACT_PASTE || pa == TE_ACT_PASTE_PRIMARY) {
+            char *clip = pa == TE_ACT_PASTE ? plat_clipboard_get(a->plat) : plat_primary_get(a->plat);
+            if (clip != nullptr) {
+                (void)sidebar_text(&a->sb, clip);
+                TE_FREE(clip);
+            }
+        } else {
+            (void)sidebar_key(&a->sb, ev->key.key, ev->key.cp, ev->key.mods);
+        }
+        a->suppress_text = !printable;
+        a->need_render = true;
+        return;
+    }
+    if (sidebar_focused(&a->sb)) {
+        te_action sa = keymap_lookup(&a->cfg.keys, ev->key.key, ev->key.cp, kmods);
+        if (sa != TE_ACT_NONE) {
+            do_action(a, sa);
+            a->suppress_text = true;
+            return;
+        }
+        if (sidebar_key(&a->sb, ev->key.key, ev->key.cp, ev->key.mods)) {
+            a->suppress_text = !printable;
+            a->need_render = true;
+            if (sidebar_take_layout_change(&a->sb)) {
+                relayout(a);
+            }
+            return;
+        }
+    }
     if (a->pending_paste != nullptr) {
         modal_answer(a, ev->key.key == TE_KEY_ENTER);
         a->suppress_text = true;
@@ -884,10 +1202,13 @@ static void on_key(app *a, const te_event *ev)
         a->suppress_text = search_key(a, p, ev);
         return;
     }
-    uint32_t mods = ev->key.mods & (TE_MOD_SHIFT | TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER);
-    te_action act = keymap_lookup(&a->cfg.keys, ev->key.key, ev->key.cp, mods);
+    te_action act = keymap_lookup(&a->cfg.keys, ev->key.key, ev->key.cp, kmods);
     if (act != TE_ACT_NONE) {
         do_action(a, act);
+        a->suppress_text = true;
+        return;
+    }
+    if (disconnected_key(a, p, ev->key.key)) {
         a->suppress_text = true;
         return;
     }
@@ -908,7 +1229,13 @@ static void on_text(app *a, const te_event *ev)
         a->suppress_text = false;
         return;
     }
-    if (a->pending_paste != nullptr || p == nullptr) {
+    if (sidebar_focused(&a->sb)) {
+        if (sidebar_text(&a->sb, ev->text.text)) {
+            a->need_render = true;
+            return;
+        }
+    }
+    if (a->pending_paste != nullptr || p == nullptr || p->disconnected) {
         return;
     }
     size_t n = strnlen(ev->text.text, sizeof ev->text.text);
@@ -1066,7 +1393,8 @@ static te_chrome make_chrome(app *a)
 {
     for (size_t i = 0; i < a->layout.ntabs; i++) {
         const te_tab *t = &a->layout.tabs[i];
-        const char *title = t->focus != nullptr ? pane_title(t->focus) : "";
+        const char *title = t->focus != nullptr ? tab_label(t->focus) : "";
+        a->tab_colors[i] = t->focus != nullptr && t->focus->sess != nullptr ? tag_color_rgb(t->focus->sess->eff.color) : 0;
         if (t->npanes > 1) {
             (void)str_fmt(a->tab_title_buf[i], sizeof a->tab_title_buf[i], "%s [%zu]", title, t->npanes);
         } else {
@@ -1074,6 +1402,9 @@ static te_chrome make_chrome(app *a)
         }
         a->tab_titles[i] = a->tab_title_buf[i];
     }
+    int ax = 0;
+    int aw = 0;
+    term_area(a, &ax, &aw);
     return (te_chrome){
         .win_w = a->width,
         .win_h = a->height,
@@ -1081,6 +1412,9 @@ static te_chrome make_chrome(app *a)
         .ntabs = a->layout.ntabs,
         .active_tab = a->layout.active,
         .tab_bar_h = tab_bar_height(a),
+        .area_x = ax,
+        .area_w = aw,
+        .tab_colors = a->tab_colors,
         .bar_bg = a->theme.ansi[0],
         .bar_fg = a->theme.fg,
         .active_bg = a->theme.bg,
@@ -1105,9 +1439,29 @@ static void on_button(app *a, const te_event *ev)
     int ix = (int)ev->button.x;
     int iy = (int)ev->button.y;
 
+    /* The sidebar first: its menus and dialogs, drags, resizing, or a click inside it. */
+    bool sb_busy = sidebar_captures(&a->sb) || a->sb.pressed || a->sb.resizing;
+    if (sb_busy || (ev->button.down && a->buttons_held == 0 &&
+                    (sidebar_contains(&a->sb, ev->button.x, ev->button.y) ||
+                     sidebar_on_edge(&a->sb, ev->button.x, ev->button.y)))) {
+        int sbtn = b == TE_MB_LEFT ? 0 : (b == TE_MB_MIDDLE ? 1 : 2);
+        (void)sidebar_button(&a->sb, ev->button.x, ev->button.y, sbtn, ev->button.down, ev->button.clicks);
+        if (sidebar_take_layout_change(&a->sb)) {
+            relayout(a);
+        }
+        a->need_render = true;
+        return;
+    }
+    if (ev->button.down) {
+        sidebar_blur(&a->sb);   /* a click in the terminal gives it the keyboard back */
+    }
+
+    int area_x = 0;
+    int area_w = 0;
+    term_area(a, &area_x, &area_w);
     if (ev->button.down) {
         /* Tab bar: select a tab (middle click closes it). */
-        if (iy < tab_bar_height(a)) {
+        if (iy < tab_bar_height(a) && ix >= area_x && ix < area_x + area_w) {
             te_chrome c = make_chrome(a);
             int ti = renderer_tab_at(a->ren, &c, ix, iy);
             if (ti >= 0) {
@@ -1225,6 +1579,27 @@ static void on_button(app *a, const te_event *ev)
 static void on_motion(app *a, const te_event *ev)
 {
     uint32_t mods = ev->motion.mods;
+    bool left = (ev->motion.buttons & 1u) != 0;
+    if (sidebar_captures(&a->sb) || a->sb.pressed || a->sb.resizing) {
+        (void)sidebar_motion(&a->sb, ev->motion.x, ev->motion.y, left);
+        if (sidebar_take_layout_change(&a->sb)) {
+            relayout(a);
+        }
+        a->need_render = true;
+        return;
+    }
+    if (a->drag_split == nullptr && a->buttons_held == 0) {
+        int old_hover = a->sb.hover;
+        bool in = sidebar_motion(&a->sb, ev->motion.x, ev->motion.y, left);
+        if (old_hover != a->sb.hover) {
+            a->need_render = true;
+        }
+        if (in || sidebar_on_edge(&a->sb, ev->motion.x, ev->motion.y)) {
+            plat_set_pointer(a->plat, TE_POINTER_DEFAULT);
+            if (in) a->need_render = true;   /* toolbar hover */
+            return;
+        }
+    }
     if (a->drag_split != nullptr) {
         layout_drag(a->drag_split, (int)ev->motion.x, (int)ev->motion.y);
         relayout(a);
@@ -1276,6 +1651,10 @@ static void on_motion(app *a, const te_event *ev)
 
 static void on_wheel(app *a, const te_event *ev)
 {
+    if (sidebar_wheel(&a->sb, ev->wheel.x, ev->wheel.y, ev->wheel.dy)) {
+        a->need_render = true;
+        return;
+    }
     te_pane *p = layout_pane_at(&a->layout, (int)ev->wheel.x, (int)ev->wheel.y);
     if (p == nullptr) {
         return;
@@ -1319,6 +1698,9 @@ static void on_focus(app *a, bool focused)
         a->buttons_held = 0;
         a->hover_valid = false;
         a->drag_split = nullptr;
+        a->sb.pressed = false;     /* a release we will never see */
+        a->sb.dragging = false;
+        a->sb.resizing = false;
     }
     note_input(a);
 }
@@ -1380,8 +1762,10 @@ static void service_panes(app *a)
             bool alive = pane_read(p, a->cli.hold);
             if (alive) {
                 plat_fd_rearm(a->plat, p->tag);
+            } else if (p->sess != nullptr && p->status != 0 && a->cfg.reconnect != TE_RECONNECT_NEVER) {
+                on_disconnect(a, p);   /* a session dropped: keep the pane and offer to reconnect */
             } else if (!a->cli.hold) {
-                close_pane(a, p);   /* the shell exited: its pane goes away */
+                close_pane(a, p);   /* the shell exited (or the user logged out): its pane goes away */
                 continue;
             }
             a->need_render = true;
@@ -1532,6 +1916,27 @@ static void render(app *a, uint64_t now)
     c.toast = now < a->toast_until_ms ? a->toast : nullptr;
     c.modal = a->pending_paste != nullptr ? a->modal : nullptr;
     renderer_chrome(a->ren, &c);
+    if (a->sb_ready) {
+        const te_theme *t = &a->theme;
+        te_ui_colors uc = {
+            .bg = ui_mix(t->bg, 0x000000, 0.18f),
+            .bg_alt = ui_mix(t->bg, t->fg, 0.07f),
+            .fg = t->fg,
+            .muted = ui_mix(t->fg, t->bg, 0.45f),
+            .accent = t->cursor,
+            .sel_bg = t->selection_bg,
+            .sel_fg = t->selection_fg,
+            .hover = ui_mix(t->bg, t->fg, 0.12f),
+            .border = ui_mix(t->bg, t->fg, 0.18f),
+            .danger = t->ansi[1],
+        };
+        te_painter painter;
+        renderer_painter(a->ren, a->scale, &painter);
+        layout_sidebar(a);
+        renderer_ui_begin(a->ren);
+        sidebar_draw(&a->sb, &painter, &uc);
+        renderer_ui_end(a->ren);
+    }
     if (renderer_end(a->ren) == TE_OK) {
         plat_swap(a->plat);
     }
@@ -1554,6 +1959,10 @@ static void app_destroy(app *a)
         pane_destroy(&all[i]);
     }
     layout_destroy(&a->layout);
+    if (a->sb_ready) {
+        sidebar_destroy(&a->sb);
+        a->sb_ready = false;
+    }
     url_destroy(&a->urls);
     watch_destroy(&a->watch);
     TE_FREE(a->pending_paste);
@@ -1596,6 +2005,20 @@ static void run(app *a)
             }
         }
         spawn_reap();
+        int ai = service_anti_idle(a, now);
+        if (ai >= 0) {
+            timeout = min_timeout(timeout, ai);
+        }
+        for (size_t i = 0; i < np; i++) {
+            te_pane *rp = all[i];
+            if (rp->disconnected && rp->reconnect_at_ms != 0) {
+                if (now >= rp->reconnect_at_ms) {
+                    reconnect_pane(a, rp);
+                } else {
+                    timeout = min_timeout(timeout, (int)(rp->reconnect_at_ms - now));
+                }
+            }
+        }
         if (a->toast_until_ms > now) {
             timeout = min_timeout(timeout, (int)(a->toast_until_ms - now) + 1);
         } else if (a->toast_until_ms != 0) {
@@ -1629,7 +2052,14 @@ static void run(app *a)
 
 int main(int argc, char **argv)
 {
-    app a = { 0 };
+    /* Helper modes: the built-in Telnet and serial clients run inside a pane. */
+    if (argc >= 2 && strcmp(argv[1], "--telnet-helper") == 0) {
+        return telnet_helper_main(argc - 2, argv + 2);
+    }
+    if (argc >= 2 && strcmp(argv[1], "--serial-helper") == 0) {
+        return serial_helper_main(argc - 2, argv + 2);
+    }
+    static app a;   /* large (sidebar state); zero-initialised */
     a.watch.fd = -1;
     a.watch_tag = -1;
     int rc = parse_cli(argc, argv, &a.cli);
@@ -1677,10 +2107,33 @@ int main(int argc, char **argv)
         goto out;
     }
 
+    /* Sessions: the sidebar, this program's path (for the helpers) and a private
+     * directory for SSH connection sharing. Each is optional. */
+    if (launch_self_exe(a.self_exe, sizeof a.self_exe) != TE_OK) {
+        a.self_exe[0] = '\0';
+        LOG_W("cannot find this program's path: Telnet and serial sessions are unavailable");
+    }
+    if (launch_control_dir(a.control_dir, sizeof a.control_dir) != TE_OK) {
+        a.control_dir[0] = '\0';
+        LOG_D("no private runtime directory: SSH connection sharing disabled");
+    }
+    {
+        char cfgdir[TE_PATH_MAX] = { 0 };
+        char root[TE_PATH_MAX] = { 0 };
+        bool have_root = paths_config_dir(cfgdir, sizeof cfgdir) == TE_OK &&
+                         str_fmt(root, sizeof root, "%s/sessions", cfgdir) == TE_OK;
+        te_sidebar_host sh = { .user = &a, .connect = host_sb_connect, .toast = host_sb_toast, .copy = host_sb_copy };
+        sidebar_init(&a.sb, have_root ? root : nullptr, &sh);
+        sidebar_configure(&a.sb, a.cfg.sidebar_visible, a.cfg.sidebar_right, a.cfg.sidebar_width, true);
+        a.sb_ready = true;
+    }
+
     const te_font_metrics *m = font_metrics(a.font);
     int pad = padding_px(&a);
     a.width = (int)a.cfg.cols * m->cell_w + 2 * pad;
     a.height = (int)a.cfg.rows * m->cell_h + 2 * pad;
+    layout_sidebar(&a);
+    a.width += (int)sidebar_width(&a.sb);   /* the terminal keeps its configured size */
     plat_set_size_px(a.plat, a.width, a.height);
 
     te_pane *first = spawn_pane(&a, a.cli.workdir, a.cli.exec_argv);

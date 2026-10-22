@@ -12,11 +12,19 @@
 #include "config/theme.h"
 #include "highlight/highlight.h"
 #include "pty/pty.h"
+#include "sessions/launch.h"
 #include "ui/search.h"
 #include "ui/selection.h"
 #include "vt/term.h"
 
 #define TE_PANE_WRITE_MAX (8u * 1024u * 1024u)
+
+/* A pane opened from a saved (or quick-connect) session. */
+typedef struct te_pane_session {
+    te_session      s;
+    te_session_eff  eff;
+    te_launch       launch;         /* the command, kept for reconnecting */
+} te_pane_session;
 
 typedef struct te_pane {
     uint32_t        id;
@@ -38,6 +46,15 @@ typedef struct te_pane {
     uint64_t        bell_until_ms;
     int             x, y, w, h;     /* rectangle in the window, pixels */
     char            bar[TE_SEARCH_MAX_QUERY + 128];
+
+    /* Sessions (nullptr for a plain shell) */
+    te_pane_session *sess;          /* owned */
+    uint64_t        started_ms;     /* when the current connection was started */
+    uint64_t        last_input_ms;  /* last keystroke or paste from the user */
+    uint64_t        last_anti_ms;   /* last anti-idle byte */
+    bool            disconnected;   /* the connection dropped; the pane waits to reconnect */
+    uint64_t        reconnect_at_ms;/* automatic reconnect due (0: waiting for the user) */
+    uint32_t        reconnect_tries;
 } te_pane;
 
 typedef struct te_pane_spawn {
@@ -52,6 +69,8 @@ typedef struct te_pane_spawn {
 } te_pane_spawn;
 
 [[nodiscard]] te_err pane_create(te_pane **out, const te_pane_spawn *sp);
+/* Start the pane's command again in a fresh pty, keeping the terminal and its history. */
+[[nodiscard]] te_err pane_respawn(te_pane *p, const te_config *cfg, const char *const *argv, const char *cwd);
 void pane_destroy(te_pane **p);
 
 /* (Re)create the highlighter from the config. Failure leaves p->hl nullptr. */

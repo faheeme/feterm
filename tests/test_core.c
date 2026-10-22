@@ -1351,6 +1351,8 @@ static void test_kitty_graphics(void)
     term_destroy(&t);
 }
 
+#include "test_sessions.inc"
+
 int main(void)
 {
     test_utf8();
@@ -1378,6 +1380,7 @@ int main(void)
     test_boxdraw();
     test_sixel();
     test_kitty_graphics();
+    test_sessions_all();
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

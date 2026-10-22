@@ -22,5 +22,7 @@ typedef te_err (*ini_handler)(void *user, const char *section, const char *key,
 
 /* Parse the file. Malformed lines are logged and skipped. */
 [[nodiscard]] te_err ini_parse_file(const char *path, ini_handler cb, void *user);
+/* Parse name inside the directory dirfd, refusing symlinks. display names the file in messages. */
+[[nodiscard]] te_err ini_parse_at(int dirfd, const char *name, const char *display, ini_handler cb, void *user);
 
 #endif

@@ -136,6 +136,7 @@ static te_key map_key(SDL_Keycode k, uint32_t *cp)
     case SDLK_F10: return TE_KEY_F10;
     case SDLK_F11: return TE_KEY_F11;
     case SDLK_F12: return TE_KEY_F12;
+    case SDLK_PAUSE: return TE_KEY_PAUSE;
     default:
         break;
     }

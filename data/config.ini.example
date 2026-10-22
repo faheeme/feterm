@@ -30,6 +30,28 @@ tab_bar = auto
 ; Darken panes that do not have focus (0 = off, up to 0.8)
 inactive_dim = 0.3
 
+[sidebar]
+; left | right
+position = left
+; Logical pixels, 180..640 (you can also drag the sidebar's edge)
+width = 280
+; Shown at startup (Ctrl+Shift+B toggles it)
+visible = true
+
+[sessions]
+; Seconds between SSH (ServerAliveInterval) and TCP keepalives, 5..3600. These stop
+; firewalls and NAT from dropping idle connections; you never see them.
+keepalive = 30
+; Anti-idle: after this many seconds without typing, send anti_idle_string so the device's
+; own idle logout (Cisco exec-timeout, Linux TMOUT) never fires. 0 turns it off. Sessions and
+; folders can override it. Nothing is sent while a full-screen program (vim, less) is open.
+anti_idle = 240
+; 1-16 bytes; escapes \0 \r \n \t \e \xHH. A NUL byte is invisible at a prompt. If a device
+; ignores it, use a space and a backspace: " \x08"
+anti_idle_string = \0
+; When a session's connection drops: ask (press Enter to reconnect) | auto | never
+reconnect = ask
+
 [terminal]
 ; Empty: $SHELL, then /etc/passwd, then /bin/sh
 shell =
@@ -119,6 +141,13 @@ resize_down = ctrl+shift+alt+down
 toggle_zoom = ctrl+shift+enter
 ; Switch to the next installed theme
 theme_next = ctrl+shift+period
+; Sidebar and sessions
+toggle_sidebar = ctrl+shift+b
+sidebar_sessions = ctrl+shift+1
+sidebar_files = ctrl+shift+2
+quick_connect = ctrl+shift+n
+; Serial and Telnet sessions: send a Break (e.g. to reach ROMMON)
+send_break = ctrl+shift+pause, ctrl+pause
 
 [security]
 ; Let programs SET the clipboard via OSC 52 (reading it is never allowed)

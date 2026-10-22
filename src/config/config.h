@@ -9,6 +9,7 @@ typedef enum { TE_CURSOR_BLOCK, TE_CURSOR_BEAM, TE_CURSOR_UNDERLINE } te_cursor_
 typedef enum { TE_BELL_NONE, TE_BELL_VISUAL, TE_BELL_URGENT } te_bell_mode;
 typedef enum { TE_TABBAR_AUTO, TE_TABBAR_ALWAYS, TE_TABBAR_NEVER } te_tabbar_mode;
 typedef enum { TE_NOTIFY_UNFOCUSED, TE_NOTIFY_ALWAYS, TE_NOTIFY_NEVER } te_notify_mode;
+typedef enum { TE_RECONNECT_ASK, TE_RECONNECT_AUTO, TE_RECONNECT_NEVER } te_reconnect_mode;
 
 typedef struct te_config {
     /* [font] */
@@ -44,6 +45,16 @@ typedef struct te_config {
     bool            click_emacs_keys; /* send Ctrl-B/Ctrl-F instead of arrow keys */
     bool            copy_on_select;   /* selecting text copies it to the PRIMARY selection */
     char            word_chars[64];   /* besides letters/digits, characters that are part of a word */
+    /* [sidebar] */
+    bool            sidebar_right;
+    float           sidebar_width;    /* logical pixels */
+    bool            sidebar_visible;
+    /* [sessions] */
+    int32_t         keepalive;        /* seconds: SSH ServerAliveInterval, TCP keepalive */
+    int32_t         anti_idle;        /* seconds without typing before a keep-awake byte; 0 off */
+    uint8_t         anti_idle_bytes[16];
+    size_t          anti_idle_len;
+    te_reconnect_mode reconnect;
     /* [keys] */
     te_keymap       keys;
     /* [security] */

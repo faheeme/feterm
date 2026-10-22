@@ -41,6 +41,11 @@ static const char *const action_names[TE_ACT_COUNT] = {
     [TE_ACT_RESIZE_DOWN] = "resize_down",
     [TE_ACT_TOGGLE_ZOOM] = "toggle_zoom",
     [TE_ACT_THEME_NEXT] = "theme_next",
+    [TE_ACT_TOGGLE_SIDEBAR] = "toggle_sidebar",
+    [TE_ACT_SIDEBAR_SESSIONS] = "sidebar_sessions",
+    [TE_ACT_SIDEBAR_FILES] = "sidebar_files",
+    [TE_ACT_QUICK_CONNECT] = "quick_connect",
+    [TE_ACT_SEND_BREAK] = "send_break",
 };
 
 typedef struct key_name {
@@ -59,6 +64,7 @@ static const key_name key_names[] = {
     { "f1", TE_KEY_F1, 0 }, { "f2", TE_KEY_F2, 0 }, { "f3", TE_KEY_F3, 0 }, { "f4", TE_KEY_F4, 0 },
     { "f5", TE_KEY_F5, 0 }, { "f6", TE_KEY_F6, 0 }, { "f7", TE_KEY_F7, 0 }, { "f8", TE_KEY_F8, 0 },
     { "f9", TE_KEY_F9, 0 }, { "f10", TE_KEY_F10, 0 }, { "f11", TE_KEY_F11, 0 }, { "f12", TE_KEY_F12, 0 },
+    { "pause", TE_KEY_PAUSE, 0 }, { "break", TE_KEY_PAUSE, 0 },
     { "space", TE_KEY_CHAR, ' ' }, { "equal", TE_KEY_CHAR, '=' }, { "plus", TE_KEY_CHAR, '+' },
     { "minus", TE_KEY_CHAR, '-' }, { "underscore", TE_KEY_CHAR, '_' }, { "comma", TE_KEY_CHAR, ',' },
     { "period", TE_KEY_CHAR, '.' }, { "slash", TE_KEY_CHAR, '/' }, { "backslash", TE_KEY_CHAR, '\\' },
@@ -112,6 +118,12 @@ void keymap_defaults(te_keymap *m)
     bind(m, TE_ACT_RESIZE_DOWN, 0, TE_KEY_DOWN, 0, cs | TE_MOD_ALT);
     bind(m, TE_ACT_TOGGLE_ZOOM, 0, TE_KEY_ENTER, 0, cs);
     bind(m, TE_ACT_THEME_NEXT, 0, TE_KEY_CHAR, '.', cs);
+    bind(m, TE_ACT_TOGGLE_SIDEBAR, 0, TE_KEY_CHAR, 'b', cs);
+    bind(m, TE_ACT_SIDEBAR_SESSIONS, 0, TE_KEY_CHAR, '1', cs);
+    bind(m, TE_ACT_SIDEBAR_FILES, 0, TE_KEY_CHAR, '2', cs);
+    bind(m, TE_ACT_QUICK_CONNECT, 0, TE_KEY_CHAR, 'n', cs);
+    bind(m, TE_ACT_SEND_BREAK, 0, TE_KEY_PAUSE, 0, cs);
+    bind(m, TE_ACT_SEND_BREAK, 1, TE_KEY_PAUSE, 0, TE_MOD_CTRL);
 }
 
 /* Parse one spec like "ctrl+shift+page_up". */

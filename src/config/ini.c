@@ -18,9 +18,9 @@ static void skip_rest_of_line(FILE *fp)
     }
 }
 
-static FILE *open_checked(const char *path)
+/* Takes ownership of fd: on failure it is closed. */
+static FILE *open_checked(int fd, const char *path)
 {
-    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOCTTY);
     if (fd < 0) {
         return nullptr;
     }
@@ -46,16 +46,9 @@ static FILE *open_checked(const char *path)
     return fp;
 }
 
-te_err ini_parse_file(const char *path, ini_handler cb, void *user)
+/* Parses an open stream and closes it. */
+static te_err parse_stream(FILE *fp, const char *path, ini_handler cb, void *user)
 {
-    if (path == nullptr || cb == nullptr) {
-        return TE_ERR_INVAL;
-    }
-    FILE *fp = open_checked(path);
-    if (fp == nullptr) {
-        return errno == ENOENT ? TE_ERR_NOTFOUND : TE_ERR_IO;
-    }
-
     te_err rc = TE_OK;
     char line[INI_MAX_LINE] = { 0 };
     char section[INI_MAX_NAME] = { 0 };
@@ -109,4 +102,28 @@ te_err ini_parse_file(const char *path, ini_handler cb, void *user)
     }
     fclose(fp);
     return rc;
+}
+
+te_err ini_parse_file(const char *path, ini_handler cb, void *user)
+{
+    if (path == nullptr || cb == nullptr) {
+        return TE_ERR_INVAL;
+    }
+    FILE *fp = open_checked(open(path, O_RDONLY | O_CLOEXEC | O_NOCTTY), path);
+    if (fp == nullptr) {
+        return errno == ENOENT ? TE_ERR_NOTFOUND : TE_ERR_IO;
+    }
+    return parse_stream(fp, path, cb, user);
+}
+
+te_err ini_parse_at(int dirfd, const char *name, const char *display, ini_handler cb, void *user)
+{
+    if (dirfd < 0 || name == nullptr || display == nullptr || cb == nullptr) {
+        return TE_ERR_INVAL;
+    }
+    FILE *fp = open_checked(openat(dirfd, name, O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NOFOLLOW), display);
+    if (fp == nullptr) {
+        return errno == ENOENT ? TE_ERR_NOTFOUND : TE_ERR_IO;
+    }
+    return parse_stream(fp, display, cb, user);
 }

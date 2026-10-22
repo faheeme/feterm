@@ -4,11 +4,13 @@ A GPU-accelerated terminal emulator in C23 that runs natively on Wayland and X11
 The name lives in two Makefile variables: `NAME` (binary, config and data directory, app-id)
 and `DISPLAY_NAME` (window title, `--version`, `TERM_PROGRAM`).
 
-**Status: all four planned phases are done.** Core terminal, PCRE2 network highlighting
-(Cisco, Arista, Juniper, shared network profile), click-to-position, selection and copy,
-mouse reporting, links, scrollback search, reflow, configurable keys, live reload, tabs
-and split panes, the kitty keyboard protocol, desktop notifications, drawn box
-characters, cursor animation, 12 themes, and inline images (sixel and kitty graphics).
+**Status:** the core terminal is complete. It has PCRE2 network highlighting (Cisco, Arista,
+Juniper and a shared network profile), click-to-position, selection and copy, mouse
+reporting, links, scrollback search, reflow, configurable keys, live reload, tabs and split
+panes, the kitty keyboard protocol, desktop notifications, drawn box characters, cursor
+animation, 12 themes, true transparency, and inline images (sixel and kitty graphics).
+The sidebar has a session manager: SSH, Telnet, serial and local sessions in folders, with
+keepalives, anti-idle and reconnect. The remote file explorer is next.
 
 ## Build
 
@@ -65,6 +67,10 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Ctrl+Shift+Enter | zoom the focused pane to the whole tab (and back) |
 | Ctrl+Shift+. | switch to the next installed theme |
 | Click in the line you are typing | move the cursor there |
+| Ctrl+Shift+B | show / hide the sidebar |
+| Ctrl+Shift+1 / Ctrl+Shift+2 | Sessions / Files tab (keyboard goes to the sidebar; Esc returns) |
+| Ctrl+Shift+N | quick connect (SSH, Telnet or serial without saving) |
+| Ctrl+Shift+Pause, Ctrl+Pause | send a Break (serial and Telnet sessions) |
 
 Every shortcut can be changed in the `[keys]` section of `config.ini`.
 
@@ -77,6 +83,45 @@ Pasting several lines into a program that does not use bracketed paste asks for
 confirmation first, because each line would run as a command as soon as it arrived.
 Links open through `xdg-open` without a shell, and only for http(s), ftp, sftp, ssh,
 file and mailto links.
+
+## Sessions
+
+The sidebar (left by default; `[sidebar] position = right` moves it) holds your saved
+sessions in folders, like SecureCRT or MobaXterm. Drag its edge to resize it, and click «
+or press Ctrl+Shift+B to collapse it to a thin strip.
+
+- **Types:** SSH, Telnet, serial console and local shell.
+  - SSH runs your system's OpenSSH, so keys, the ssh agent, `~/.ssh/config`, jump hosts and
+    known_hosts all work as usual.
+  - Telnet and serial are built in, so no extra programs are needed.
+- **Serial:** any speed from 300 to 4000000 baud, plus custom rates (e.g. 250000), with data
+  bits, parity, stop bits and flow control. Ctrl+Shift+Pause sends a Break for ROMMON and
+  password recovery. If the port says permission denied, join the `dialout` group:
+  `sudo usermod -aG dialout $USER`, then log in again.
+- **Managing sessions:** right-click opens a menu (it never acts by itself). You can connect,
+  connect in a split, edit, duplicate, rename, copy the host, and delete (it always asks
+  first). Folders have New session here, New folder here, Folder settings, Rename and
+  Delete. Drag a session onto a folder to move it.
+- **Keyboard:** type in the filter box to find sessions by name, host or folder. Up/Down
+  select, Enter connects (Shift+Enter in a split), Left/Right close and open folders, F2
+  renames, Delete deletes (after asking) and Shift+F10 opens the menu.
+- **Folder settings:** a folder's colour, default user and anti-idle setting apply to
+  everything inside it unless a session sets its own. A session's colour shows as a stripe
+  on its tab (e.g. red for production).
+- **Staying connected:**
+  - SSH and TCP keepalives stop firewalls from dropping idle sessions.
+  - Anti-idle stops the device's own idle logout (Cisco `exec-timeout`, Linux `TMOUT`):
+    after 4 minutes without typing, FeTerm sends an invisible NUL byte. Nothing is sent
+    while a full-screen program such as vim or less is open.
+  - If a connection drops, the tab stays open with its history. Press Enter to reconnect, or
+    set `reconnect = auto`.
+- **Passwords are never stored.** Use SSH keys or the agent, or type the password when asked.
+- **Shared logins:** SSH sessions share one login per host (OpenSSH connection sharing).
+  Opening a second tab to the same host is instant, and the file explorer will reuse it. If
+  an old device refuses shared connections, untick "Share login" for that session.
+
+Sessions are plain files: `~/.config/feterm/sessions/<folder>/<name>.ini` (mode 0600). You
+can back them up, sync them, or edit them by hand.
 
 ## Transparency
 

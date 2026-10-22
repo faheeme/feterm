@@ -6,7 +6,7 @@
 # ---------------------------------------------------------------------------
 NAME       ?= feterm
 DISPLAY_NAME ?= FeTerm
-VERSION    ?= 0.2.0
+VERSION    ?= 0.3.0
 APP_ID     ?= io.github.$(NAME)
 PREFIX     ?= /usr/local
 DATADIR    ?= $(PREFIX)/share/$(NAME)
@@ -57,12 +57,12 @@ $(NAME): $(OBJ)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # Headless unit tests for the core, built with ASan + UBSan.
-TEST_SRC := $(wildcard src/util/*.c src/config/*.c src/vt/*.c src/highlight/*.c src/ui/*.c) \
+TEST_SRC := $(wildcard src/util/*.c src/config/*.c src/vt/*.c src/highlight/*.c src/ui/*.c src/sessions/*.c) \
             src/input/keys.c src/input/click.c src/input/mouse.c src/input/keybind.c \
             src/app/layout.c src/render/boxdraw.c tests/test_core.c
 TEST_SAN := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 
-$(BUILD)/test_core: $(TEST_SRC) $(GEN)/app_name.h
+$(BUILD)/test_core: $(TEST_SRC) $(wildcard tests/*.inc) $(GEN)/app_name.h
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -std=c23 $(WARN) -Wno-missing-prototypes -O1 -g $(TEST_SAN) \
 	    $(shell $(PKG_CONFIG) --cflags libpcre2-8) $(TEST_SRC) -o $@ $(shell $(PKG_CONFIG) --libs libpcre2-8) -lm
@@ -77,7 +77,7 @@ debug:
 
 # GCC static analyzer.
 analyze:
-	$(MAKE) BUILD=build-analyze OPT="-O0 -fanalyzer" NAME=$(NAME)
+	$(MAKE) BUILD=build-analyze OPT="-O1 -fanalyzer" NAME=$(NAME)
 
 ICON_SIZES := 16 24 32 48 64 128 256 512
 ICONDIR    := $(PREFIX)/share/icons/hicolor

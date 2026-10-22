@@ -92,12 +92,41 @@ fail:
     return rc;
 }
 
+te_err pane_respawn(te_pane *p, const te_config *cfg, const char *const *argv, const char *cwd)
+{
+    if (p == nullptr || cfg == nullptr) {
+        return TE_ERR_INVAL;
+    }
+    pty_destroy(&p->pty);
+    pty_init(&p->pty);
+    te_pty_opts po = {
+        .argv = argv,
+        .shell = cfg->shell,
+        .cwd = cwd,
+        .term = cfg->term,
+        .cols = term_cols(p->term),
+        .rows = term_rows(p->term),
+        .px_w = 0,
+        .px_h = 0,
+    };
+    te_err rc = pty_spawn(&p->pty, &po);
+    if (rc != TE_OK) {
+        return rc;
+    }
+    p->exited = false;
+    p->status = 0;
+    p->wq_len = 0;
+    p->fd_ready = false;
+    return TE_OK;
+}
+
 void pane_destroy(te_pane **pp)
 {
     if (pp == nullptr || *pp == nullptr) {
         return;
     }
     te_pane *p = *pp;
+    TE_FREE(p->sess);
     pty_destroy(&p->pty);
     hl_destroy(&p->hl);
     search_destroy(&p->search);
@@ -169,8 +198,13 @@ bool pane_read(te_pane *p, bool hold)
         } else if (n == 0) {
             break;
         } else {
+            /* The pty closes a moment before the child is gone: give it up to
+             * 200 ms so the exit status (logout vs. dropped connection) is real. */
             int status = 0;
-            (void)pty_reap(&p->pty, &status);
+            for (int i = 0; i < 20 && !pty_reap(&p->pty, &status); i++) {
+                struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000 * 1000 };
+                nanosleep(&ts, nullptr);
+            }
             p->exited = true;
             p->status = status;
             p->wq_len = 0;

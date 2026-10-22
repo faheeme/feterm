@@ -1186,17 +1186,18 @@ static float tab_width(const te_renderer *r, const te_chrome *c)
 {
     const te_font_metrics *m = font_metrics(r->font);
     float maxw = (float)m->cell_w * 32.0f;
-    float w = c->ntabs > 0 ? (float)c->win_w / (float)c->ntabs : (float)c->win_w;
+    float aw = (float)(c->area_w > 0 ? c->area_w : c->win_w);
+    float w = c->ntabs > 0 ? aw / (float)c->ntabs : aw;
     return w > maxw ? maxw : w;
 }
 
 int renderer_tab_at(const te_renderer *r, const te_chrome *c, int x, int y)
 {
-    if (r == nullptr || c == nullptr || c->tab_bar_h <= 0 || y < 0 || y >= c->tab_bar_h || x < 0) {
+    if (r == nullptr || c == nullptr || c->tab_bar_h <= 0 || y < 0 || y >= c->tab_bar_h || x < c->area_x) {
         return -1;
     }
     float tw = tab_width(r, c);
-    size_t i = (size_t)((float)x / tw);
+    size_t i = (size_t)((float)(x - c->area_x) / tw);
     return i < c->ntabs ? (int)i : -1;
 }
 
@@ -1215,15 +1216,22 @@ void renderer_chrome(te_renderer *r, const te_chrome *c)
     if (c->tab_bar_h > 0 && c->ntabs > 0) {
         float bh = (float)c->tab_bar_h;
         float tw = tab_width(r, c);
-        push_rect(&r->bg, 0.0f, 0.0f, (float)c->win_w, bh, c->bar_bg, 1.0f);
+        float ax = (float)c->area_x;
+        float aw = (float)(c->area_w > 0 ? c->area_w : c->win_w);
+        push_rect(&r->bg, ax, 0.0f, aw, bh, c->bar_bg, 1.0f);
         for (size_t i = 0; i < c->ntabs; i++) {
             bool active = i == c->active_tab;
-            float x = (float)i * tw;
+            float x = ax + (float)i * tw;
             if (active) {
                 push_rect(&r->bg, x, 0.0f, tw, bh, c->active_bg, 1.0f);
                 push_rect(&r->deco, x, bh - 2.0f, tw, 2.0f, c->accent, 1.0f);
             } else if (i > 0 && i - 1 != c->active_tab) {
                 push_rect(&r->deco, x, bh * 0.25f, 1.0f, bh * 0.5f, c->bar_fg, 0.25f);
+            }
+            /* A session's colour tag: a stripe along the top of its tab. */
+            if (c->tab_colors != nullptr && c->tab_colors[i] != 0) {
+                float sh = TE_MAX(3.0f, bh * 0.1f);
+                push_rect(&r->deco, x, 0.0f, tw, sh, c->tab_colors[i], 1.0f);
             }
             /* "N title", truncated with an ellipsis to fit. */
             uint32_t cps[160] = { 0 };
@@ -1282,4 +1290,79 @@ te_err renderer_end(te_renderer *r)
 bool renderer_animating(const te_renderer *r)
 {
     return r != nullptr && r->animating;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Free-form UI */
+
+static void ui_rect_cb(void *user, te_layer layer, float x, float y, float w, float h, uint32_t rgb, float alpha)
+{
+    te_renderer *r = user;
+    push_rect(layer == TE_LAYER_OVERLAY ? &r->ov_rects : &r->bg, x, y, w, h, rgb, alpha);
+}
+
+static void ui_text_cb(void *user, te_layer layer, float x, float y, const char *utf8, size_t max_cols, uint32_t rgb,
+                       bool bold)
+{
+    te_renderer *r = user;
+    const te_font_metrics *m = font_metrics(r->font);
+    inst_vec *v = layer == TE_LAYER_OVERLAY ? &r->ov_glyphs : &r->glyphs;
+    size_t col = 0;
+    te_utf8_dec d = { 0 };
+    for (const char *s = utf8; *s != '\0' && col < max_cols; s++) {
+        uint32_t cp = 0;
+        te_utf8_res res = utf8_feed(&d, (uint8_t)*s, &cp);
+        if (res == TE_UTF8_MORE) {
+            continue;
+        }
+        if (res == TE_UTF8_ERROR) {
+            cp = 0xFFFD;
+        }
+        int w = te_wcwidth(cp);
+        if (w <= 0) {
+            continue;   /* combining marks and controls take no cell here */
+        }
+        if (col + (size_t)w > max_cols) {
+            break;
+        }
+        if (cp != ' ') {
+            const glyph *g = get_glyph(r, cp, bold ? TE_FONT_BOLD : TE_FONT_REGULAR, w == 2);
+            if (g != nullptr && g->present) {
+                push_glyph(v, g, x + (float)col * (float)m->cell_w + (float)g->left,
+                           y + (float)m->baseline - (float)g->top, rgb, 1.0f);
+            }
+        }
+        col += (size_t)w;
+    }
+}
+
+void renderer_painter(te_renderer *r, float scale, te_painter *out)
+{
+    const te_font_metrics *m = font_metrics(r->font);
+    *out = (te_painter){
+        .user = r,
+        .cell_w = (float)m->cell_w,
+        .cell_h = (float)m->cell_h,
+        .scale = scale > 0.0f ? scale : 1.0f,
+        .rect = ui_rect_cb,
+        .text = ui_text_cb,
+    };
+}
+
+void renderer_ui_begin(te_renderer *r)
+{
+    if (r == nullptr) {
+        return;
+    }
+    clear_vectors(r);
+    r->nimgs = 0;
+}
+
+void renderer_ui_end(te_renderer *r)
+{
+    if (r == nullptr) {
+        return;
+    }
+    te_frame f = { 0 };
+    flush_vectors(r, &f);
 }

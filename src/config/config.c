@@ -29,6 +29,14 @@ void config_defaults(te_config *c)
     c->tab_bar = TE_TABBAR_AUTO;
     c->inactive_dim = 0.3f;
     c->notifications = TE_NOTIFY_UNFOCUSED;
+    c->sidebar_right = false;
+    c->sidebar_width = 280.0f;
+    c->sidebar_visible = true;
+    c->keepalive = 30;
+    c->anti_idle = 240;
+    c->anti_idle_bytes[0] = 0;   /* a NUL byte: counts as activity, prints nothing */
+    c->anti_idle_len = 1;
+    c->reconnect = TE_RECONNECT_ASK;
     (void)str_copy(c->hl_mode, sizeof c->hl_mode, "auto");
     (void)str_copy(c->hl_fallback, sizeof c->hl_fallback, "network-common");
     c->hl_alt_screen = false;
@@ -177,6 +185,40 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
             set_str(c->word_chars, sizeof c->word_chars, value, path, line);
         } else {
             LOG_W("%s:%u: unknown key [mouse] %s", path, line, key);
+        }
+    } else if (strcmp(sec, "sidebar") == 0) {
+        if (strcmp(key, "position") == 0) {
+            if (strcmp(value, "left") == 0) c->sidebar_right = false;
+            else if (strcmp(value, "right") == 0) c->sidebar_right = true;
+            else BAD("position (left|right)");
+        } else if (strcmp(key, "width") == 0) {
+            if (str_to_float(value, 180.0f, 640.0f, &f)) c->sidebar_width = f; else BAD("width (180..640)");
+        } else if (strcmp(key, "visible") == 0) {
+            if (str_to_bool(value, &b)) c->sidebar_visible = b; else BAD("boolean");
+        } else {
+            LOG_W("%s:%u: unknown key [sidebar] %s", path, line, key);
+        }
+    } else if (strcmp(sec, "sessions") == 0) {
+        if (strcmp(key, "keepalive") == 0) {
+            if (str_to_long(value, 5, 3600, &l)) c->keepalive = (int32_t)l; else BAD("keepalive (5..3600 seconds)");
+        } else if (strcmp(key, "anti_idle") == 0) {
+            if (str_to_long(value, 0, 86400, &l)) c->anti_idle = (int32_t)l; else BAD("anti_idle (0..86400 seconds)");
+        } else if (strcmp(key, "anti_idle_string") == 0) {
+            uint8_t tmp[sizeof c->anti_idle_bytes] = { 0 };
+            size_t n = 0;
+            if (str_unescape(value, tmp, sizeof tmp, &n) && n > 0) {
+                memcpy(c->anti_idle_bytes, tmp, n);
+                c->anti_idle_len = n;
+            } else {
+                BAD("anti_idle_string (1-16 bytes; escapes \\0 \\r \\n \\t \\e \\xHH)");
+            }
+        } else if (strcmp(key, "reconnect") == 0) {
+            if (strcmp(value, "ask") == 0) c->reconnect = TE_RECONNECT_ASK;
+            else if (strcmp(value, "auto") == 0) c->reconnect = TE_RECONNECT_AUTO;
+            else if (strcmp(value, "never") == 0) c->reconnect = TE_RECONNECT_NEVER;
+            else BAD("reconnect (ask|auto|never)");
+        } else {
+            LOG_W("%s:%u: unknown key [sessions] %s", path, line, key);
         }
     } else if (strcmp(sec, "keys") == 0) {
         te_err krc = keymap_set(&c->keys, key, value);

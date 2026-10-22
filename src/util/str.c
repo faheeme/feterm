@@ -159,3 +159,47 @@ bool str_to_bool(const char *s, bool *out)
     }
     return false;
 }
+
+static int hex_val(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+bool str_unescape(const char *s, uint8_t *out, size_t outsz, size_t *len)
+{
+    size_t n = 0;
+    *len = 0;
+    for (; *s != '\0'; s++) {
+        uint8_t b = (uint8_t)*s;
+        if (*s == '\\') {
+            s++;
+            switch (*s) {
+            case '0':  b = 0; break;
+            case 'r':  b = '\r'; break;
+            case 'n':  b = '\n'; break;
+            case 't':  b = '\t'; break;
+            case 'e':  b = 0x1B; break;
+            case '\\': b = '\\'; break;
+            case 'x': {
+                int hi = hex_val(s[1]);
+                int lo = hi >= 0 ? hex_val(s[2]) : -1;
+                if (lo < 0) return false;
+                b = (uint8_t)(hi * 16 + lo);
+                s += 2;
+                break;
+            }
+            default:
+                return false;
+            }
+        }
+        if (n >= outsz) {
+            return false;
+        }
+        out[n++] = b;
+    }
+    *len = n;
+    return true;
+}

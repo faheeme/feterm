@@ -29,5 +29,10 @@ char *str_trim(char *s);
 [[nodiscard]] bool str_to_long(const char *s, long min, long max, long *out);
 [[nodiscard]] bool str_to_float(const char *s, float min, float max, float *out);
 [[nodiscard]] bool str_to_bool(const char *s, bool *out);
+/*
+ * Decode C-style escapes (\0 \r \n \t \e \\ \xHH) into raw bytes. Fails on a
+ * malformed escape or if the result does not fit in outsz bytes.
+ */
+[[nodiscard]] bool str_unescape(const char *s, uint8_t *out, size_t outsz, size_t *len);
 
 #endif

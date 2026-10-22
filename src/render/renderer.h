@@ -7,6 +7,7 @@
 #include "config/config.h"
 #include "highlight/highlight.h"
 #include "render/font.h"
+#include "ui/paint.h"
 #include "ui/search.h"
 #include "ui/selection.h"
 #include "ui/url.h"
@@ -52,6 +53,8 @@ typedef struct te_chrome {
     size_t              ntabs;
     size_t              active_tab;
     int                 tab_bar_h;   /* 0: no tab bar */
+    int                 area_x, area_w; /* horizontal extent of the tab bar (the terminal area) */
+    const uint32_t     *tab_colors;  /* ntabs entries, 0 = no colour tag; may be nullptr */
     const int         (*dividers)[4];/* x, y, w, h */
     size_t              ndividers;
     uint32_t            bar_bg, bar_fg, active_bg, active_fg, accent, divider;
@@ -79,5 +82,13 @@ void renderer_chrome(te_renderer *r, const te_chrome *c);
 bool renderer_animating(const te_renderer *r);
 /* Tab index under a point in the tab bar, or -1. */
 int renderer_tab_at(const te_renderer *r, const te_chrome *c, int x, int y);
+
+/*
+ * Free-form UI (sidebar, menus, dialogs) drawn on top of everything else:
+ * renderer_ui_begin, then draw through the painter, then renderer_ui_end.
+ */
+void renderer_painter(te_renderer *r, float scale, te_painter *out);
+void renderer_ui_begin(te_renderer *r);
+void renderer_ui_end(te_renderer *r);
 
 #endif
