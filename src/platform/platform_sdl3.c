@@ -1,6 +1,7 @@
 /* SDL3 backend: one code path for Wayland and X11 (SDL picks at runtime). */
 #include "platform/platform.h"
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -20,6 +21,7 @@
 struct te_platform {
     SDL_Window    *win;
     SDL_GLContext  gl;
+    bool           alpha;          /* the window has an alpha channel the compositor can use */
     SDL_Cursor    *ibeam;
     SDL_Cursor    *hand;
     SDL_Cursor    *arrow;
@@ -201,6 +203,103 @@ static int SDLCALL fd_thread(void *arg)
     return 0;
 }
 
+/* Creates the window and its GL context, with or without an alpha channel. */
+static bool create_surface(te_platform *p, const te_platform_opts *o, bool alpha)
+{
+    (void)SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, alpha ? 8 : 0);
+    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                            SDL_WINDOW_HIDDEN;
+    if (alpha) {
+        flags |= SDL_WINDOW_TRANSPARENT;
+    }
+    p->win = SDL_CreateWindow(o->title != nullptr ? o->title : APP_DISPLAY_NAME, o->width, o->height, flags);
+    if (p->win == nullptr) {
+        LOG_W("SDL_CreateWindow%s: %s", alpha ? " (transparent)" : "", SDL_GetError());
+        return false;
+    }
+    p->gl = SDL_GL_CreateContext(p->win);
+    if (p->gl == nullptr) {
+        LOG_W("SDL_GL_CreateContext (OpenGL ES 3.0%s): %s", alpha ? ", alpha" : "", SDL_GetError());
+        SDL_DestroyWindow(p->win);
+        p->win = nullptr;
+        return false;
+    }
+    p->alpha = alpha;
+    return true;
+}
+
+typedef unsigned long (*x_intern_atom_fn)(void *dpy, const char *name, int only_if_exists);
+typedef unsigned long (*x_get_selection_owner_fn)(void *dpy, unsigned long atom);
+
+/* Looks up a libX11 function; dlsym hands back an object pointer. */
+static bool x11_sym(void *lib, const char *name, void *fn_out, size_t fn_size)
+{
+    void *sym = dlsym(lib, name);
+    if (sym == nullptr || fn_size != sizeof sym) {
+        return false;
+    }
+    memcpy(fn_out, &sym, fn_size);
+    return true;
+}
+
+/*
+ * A compositing manager owns the _NET_WM_CM_S<screen> selection (EWMH). Without
+ * one, X11 ignores the alpha channel and a translucent window just looks dark.
+ * libX11 is already loaded by SDL; RTLD_NOLOAD never loads anything new.
+ */
+static bool x11_compositor_running(SDL_Window *win)
+{
+    SDL_PropertiesID props = SDL_GetWindowProperties(win);
+    if (props == 0) {
+        return false;
+    }
+    void *dpy = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
+    Sint64 screen = SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_SCREEN_NUMBER, -1);
+    if (dpy == nullptr || screen < 0 || screen > 255) {
+        return false;
+    }
+    char atom_name[32] = { 0 };
+    if (str_fmt(atom_name, sizeof atom_name, "_NET_WM_CM_S%d", (int)screen) != TE_OK) {
+        return false;
+    }
+    void *lib = dlopen("libX11.so.6", RTLD_LAZY | RTLD_LOCAL | RTLD_NOLOAD);
+    if (lib == nullptr) {
+        LOG_D("libX11 not loaded: cannot check for a compositor");
+        return false;
+    }
+    bool running = false;
+    x_intern_atom_fn intern_atom = nullptr;
+    x_get_selection_owner_fn selection_owner = nullptr;
+    if (x11_sym(lib, "XInternAtom", &intern_atom, sizeof intern_atom) &&
+        x11_sym(lib, "XGetSelectionOwner", &selection_owner, sizeof selection_owner)) {
+        unsigned long atom = intern_atom(dpy, atom_name, 1);   /* only if it exists */
+        running = atom != 0 && selection_owner(dpy, atom) != 0;
+    }
+    intern_atom = nullptr;
+    selection_owner = nullptr;
+    (void)dlclose(lib);
+    lib = nullptr;
+    return running;
+}
+
+bool plat_transparency_available(te_platform *p)
+{
+    if (p == nullptr || p->win == nullptr || !p->alpha) {
+        return false;
+    }
+    const char *drv = SDL_GetCurrentVideoDriver();
+    if (drv == nullptr) {
+        return false;
+    }
+    if (strcmp(drv, "wayland") == 0) {
+        return true;   /* every Wayland compositor blends alpha surfaces */
+    }
+    if (strcmp(drv, "x11") == 0) {
+        return x11_compositor_running(p->win);
+    }
+    return false;
+}
+
 te_err plat_create(te_platform **out, const te_platform_opts *o)
 {
     if (out == nullptr || o == nullptr) {
@@ -232,26 +331,18 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     (void)SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    (void)SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, o->transparent ? 8 : 0);
 
-    SDL_WindowFlags flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
-                            SDL_WINDOW_HIDDEN;
-    if (o->transparent) {
-        flags |= SDL_WINDOW_TRANSPARENT;
-    }
-    p->win = SDL_CreateWindow(o->title != nullptr ? o->title : APP_DISPLAY_NAME, o->width, o->height, flags);
-    if (p->win == nullptr) {
-        LOG_E("SDL_CreateWindow: %s", SDL_GetError());
-        plat_destroy(&p);
-        return TE_ERR_PLATFORM;
+    /* Always ask for an alpha channel, so transparency can be switched on by a
+     * config reload; fall back to an opaque window if the driver refuses. */
+    if (!create_surface(p, o, true)) {
+        LOG_W("transparent window unavailable; using an opaque one");
+        if (!create_surface(p, o, false)) {
+            LOG_E("could not create the window");
+            plat_destroy(&p);
+            return TE_ERR_PLATFORM;
+        }
     }
     set_window_icon(p->win);
-    p->gl = SDL_GL_CreateContext(p->win);
-    if (p->gl == nullptr) {
-        LOG_E("SDL_GL_CreateContext (OpenGL ES 3.0): %s", SDL_GetError());
-        plat_destroy(&p);
-        return TE_ERR_PLATFORM;
-    }
     if (!SDL_GL_MakeCurrent(p->win, p->gl)) {
         LOG_E("SDL_GL_MakeCurrent: %s", SDL_GetError());
         plat_destroy(&p);

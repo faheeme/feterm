@@ -104,6 +104,8 @@ typedef struct app {
     int           watch_tag;
     uint64_t      reload_due_ms;
 
+    float         opacity;           /* cfg.opacity, or 1.0 when the desktop cannot show it */
+
     char          tab_title_buf[TE_MAX_TABS][96];
     const char   *tab_titles[TE_MAX_TABS];
 } app;
@@ -686,6 +688,20 @@ static void apply_theme_to_panes(app *a)
     a->need_render = true;
 }
 
+/* Works out the opacity to draw with: the configured value, unless nothing on
+ * this desktop can composite a translucent window (X11 without a compositor). */
+static void update_opacity(app *a)
+{
+    float want = TE_CLAMP(a->cfg.opacity, 0.1f, 1.0f);
+    bool available = want >= 1.0f || plat_transparency_available(a->plat);
+    float old = a->opacity;
+    a->opacity = available ? want : 1.0f;
+    if (!available && old != 1.0f) {
+        LOG_I("no compositor running: transparency off (opacity %.2f ignored)", (double)want);
+    }
+    a->need_render = true;
+}
+
 static void reload_config(app *a)
 {
     te_config nc;
@@ -721,6 +737,7 @@ static void reload_config(app *a)
     for (size_t i = 0; i < n; i++) {
         pane_setup_highlight(all[i], &a->cfg);
     }
+    update_opacity(a);
     apply_size(a);
     show_toast(a, "Configuration reloaded");
 }
@@ -1446,7 +1463,8 @@ static void render_pane(app *a, te_pane *p, bool focused_pane, bool several, uin
     }
     te_render_opts o = {
         .padding = padding_px(a),
-        .opacity = a->cfg.opacity,
+        .opacity = a->opacity,
+        .transparent_cells = a->cfg.transparent_cells,
         .cursor_shape = a->cfg.cursor_shape,
         .bold_is_bright = a->cfg.bold_is_bright,
         .cursor_text = a->theme.cursor_text,
@@ -1500,7 +1518,7 @@ static void render_pane(app *a, te_pane *p, bool focused_pane, bool several, uin
 static void render(app *a, uint64_t now)
 {
     a->need_render = false;
-    renderer_begin(a->ren, a->width, a->height, a->theme.bg, a->cfg.opacity);
+    renderer_begin(a->ren, a->width, a->height, a->theme.bg, a->opacity);
     te_pane *vis[TE_MAX_PANES_PER_TAB] = { 0 };
     size_t n = layout_visible_panes(&a->layout, vis, TE_ARRAY_LEN(vis));
     te_pane *focus = focus_pane(a);
@@ -1637,13 +1655,14 @@ int main(int argc, char **argv)
         .app_id = a.cli.app_id,
         .width = 800,
         .height = 600,
-        .transparent = a.cfg.opacity < 1.0f,
     };
     err = plat_create(&a.plat, &po);
     if (err != TE_OK) {
         LOG_E("cannot open a window: %s", te_strerror(err));
         goto out;
     }
+    a.opacity = 0.0f;   /* forces the first update_opacity() to report a fallback */
+    update_opacity(&a);
     a.scale = plat_content_scale(a.plat);
     a.font_pt = a.cfg.font_size;
     a.layout.divider = (int)lroundf(2.0f * a.scale);

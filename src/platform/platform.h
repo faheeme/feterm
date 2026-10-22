@@ -56,7 +56,6 @@ typedef struct te_platform_opts {
     const char *title;
     const char *app_id;
     int         width, height;   /* logical pixels */
-    bool        transparent;
 } te_platform_opts;
 
 [[nodiscard]] te_err plat_create(te_platform **out, const te_platform_opts *o);
@@ -72,6 +71,9 @@ void plat_set_size_px(te_platform *p, int w, int h);
 float plat_content_scale(te_platform *p);
 void plat_set_title(te_platform *p, const char *utf8);
 void plat_bell(te_platform *p);
+/* True if the desktop will actually show a translucent window: always on Wayland,
+ * on X11 only while a compositor runs. Cheap enough to call on config reload. */
+bool plat_transparency_available(te_platform *p);
 uint64_t plat_ticks_ms(void);
 
 /* Clipboard. Getters return a heap string the caller frees with free(), or nullptr. */

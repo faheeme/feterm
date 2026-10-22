@@ -14,7 +14,8 @@
 
 typedef struct te_render_opts {
     int             padding;         /* physical pixels */
-    float           opacity;
+    float           opacity;         /* default background; 1.0 when the desktop cannot composite */
+    bool            transparent_cells; /* coloured cell backgrounds follow opacity too */
     te_cursor_shape cursor_shape;    /* used when the application has not set DECSCUSR */
     bool            bold_is_bright;
     uint32_t        cursor_text;     /* text colour under a block cursor */

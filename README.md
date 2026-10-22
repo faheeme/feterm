@@ -78,6 +78,30 @@ confirmation first, because each line would run as a command as soon as it arriv
 Links open through `xdg-open` without a shell, and only for http(s), ftp, sftp, ssh,
 file and mailto links.
 
+## Transparency
+
+The terminal area is see-through by default (`opacity = 0.90` in the `[window]` section of
+`config.ini`). The title bar, tab bar, search bar, pop-ups and text always stay solid, and
+so do selection and search highlights. 0.90 reads cleanly over busy wallpapers. With a
+compositor that blurs, 0.85 gives a frosted-glass look, and 1.0 turns transparency off.
+Changes apply when the file is saved, without a restart.
+
+| Desktop | Transparency |
+|---|---|
+| GNOME, KDE Plasma, Cinnamon, Xfce (compositing on) | yes |
+| Sway, Hyprland, niri, river, Wayfire and other Wayland compositors | yes |
+| i3, bspwm, awesome, dwm, Openbox, herbstluftwm (X11) | with picom running |
+| X11 without a compositor | drawn opaque (detected automatically) |
+
+On X11, FeTerm checks for a compositor at startup and on every config reload, so you can
+start picom and press Ctrl+Shift+R. Window-manager opacity rules (Hyprland `windowrule`,
+Sway `opacity`, picom `opacity-rule`) multiply with FeTerm's own setting. FeTerm doesn't ask
+for blur itself. Hyprland's `decoration:blur`, picom's blur (`--backend glx`) and GNOME's
+Blur my Shell extension blur it automatically.
+
+Programs that paint their own background colour, such as vim colour schemes and tmux status
+lines, stay solid. Set `transparent_cell_backgrounds = true` to make them see-through too.
+
 ## Network highlighting
 
 Profiles are `.ini` files in `data/highlight/` (bundled) and `~/.config/feterm/highlight/`

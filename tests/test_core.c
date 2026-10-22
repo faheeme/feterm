@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include "config/config.h"
 #include "config/ini.h"
 #include "highlight/highlight.h"
 #include "app/layout.h"
@@ -400,6 +401,50 @@ static void test_ini(void)
     uint32_t rgb = 0;
     CHECK(color_parse("#a1B2c3", &rgb) && rgb == 0xA1B2C3);
     CHECK(!color_parse("#a1B2c", &rgb) && !color_parse("#a1B2c3d", &rgb) && !color_parse("zzzzzz", &rgb));
+}
+
+/* Writes text to a new temporary file; path receives its name. */
+static bool write_tmp(char *path, const char *text)
+{
+    int fd = mkstemp(path);
+    if (fd < 0) return false;
+    FILE *fp = fdopen(fd, "w");
+    if (fp == nullptr) { close(fd); unlink(path); return false; }
+    bool ok = fputs(text, fp) >= 0;
+    ok = fclose(fp) == 0 && ok;
+    if (!ok) unlink(path);
+    return ok;
+}
+
+static void test_config_transparency(void)
+{
+    te_config c;
+    config_defaults(&c);
+    CHECK(c.opacity > 0.899f && c.opacity < 0.901f);
+    CHECK(!c.transparent_cells);
+
+    /* Out-of-range and malformed values are rejected and leave the defaults. */
+    char bad[] = "/tmp/te-cfg-XXXXXX";
+    CHECK(write_tmp(bad, "[window]\nopacity = 0.05\ntransparent_cell_backgrounds = maybe\n"));
+    CHECK(config_load(&c, bad) == TE_OK);
+    CHECK(c.opacity > 0.899f && c.opacity < 0.901f && !c.transparent_cells);
+    unlink(bad);
+    char high[] = "/tmp/te-cfg-XXXXXX";
+    CHECK(write_tmp(high, "[window]\nopacity = 1.5\n"));
+    CHECK(config_load(&c, high) == TE_OK);
+    CHECK(c.opacity > 0.899f && c.opacity < 0.901f);
+    unlink(high);
+
+    char good[] = "/tmp/te-cfg-XXXXXX";
+    CHECK(write_tmp(good, "[window]\nopacity = 0.75\ntransparent_cell_backgrounds = true\n"));
+    CHECK(config_load(&c, good) == TE_OK);
+    CHECK(c.opacity > 0.749f && c.opacity < 0.751f && c.transparent_cells);
+    unlink(good);
+    char off[] = "/tmp/te-cfg-XXXXXX";
+    CHECK(write_tmp(off, "[window]\nopacity = 1.0\ntransparent_cell_backgrounds = false\n"));
+    CHECK(config_load(&c, off) == TE_OK);
+    CHECK(c.opacity > 0.999f && !c.transparent_cells);
+    unlink(off);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1317,6 +1362,7 @@ int main(void)
     test_hostile_input();
     test_keys();
     test_ini();
+    test_config_transparency();
     test_highlight();
     test_click();
     test_reflow();

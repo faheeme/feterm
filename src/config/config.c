@@ -16,7 +16,8 @@ void config_defaults(te_config *c)
     c->cols = 100;
     c->rows = 30;
     c->padding = 8;
-    c->opacity = 1.0f;
+    c->opacity = 0.9f;
+    c->transparent_cells = false;
     (void)str_copy(c->theme, sizeof c->theme, "catppuccin-mocha");
     (void)str_copy(c->term, sizeof c->term, "xterm-256color");
     c->scrollback = 10000;
@@ -88,6 +89,8 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
             if (str_to_long(value, 0, 200, &l)) c->padding = (uint16_t)l; else BAD("padding");
         } else if (strcmp(key, "opacity") == 0) {
             if (str_to_float(value, 0.1f, 1.0f, &f)) c->opacity = f; else BAD("opacity");
+        } else if (strcmp(key, "transparent_cell_backgrounds") == 0) {
+            if (str_to_bool(value, &b)) c->transparent_cells = b; else BAD("boolean");
         } else if (strcmp(key, "tab_bar") == 0) {
             if (strcmp(value, "auto") == 0) c->tab_bar = TE_TABBAR_AUTO;
             else if (strcmp(value, "always") == 0) c->tab_bar = TE_TABBAR_ALWAYS;

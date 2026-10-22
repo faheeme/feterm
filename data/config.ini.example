@@ -15,8 +15,14 @@ columns = 100
 rows = 30
 ; Logical pixels around the grid
 padding = 8
-; 0.1..1.0; values below 1 need a compositor
-opacity = 1.0
+; Transparency of the terminal area, 0.1..1.0 (1.0 = opaque). The title bar, tab bar,
+; search bar, pop-ups and text always stay solid. Needs a compositor: any Wayland desktop
+; or compositor (GNOME, KDE, Sway, Hyprland, niri, river...), or on X11 a compositing
+; window manager or picom. Without one the terminal is drawn opaque.
+opacity = 0.90
+; Also make coloured cell backgrounds (vim colour schemes, tmux status lines) see-through.
+; Selection and search highlights always stay solid.
+transparent_cell_backgrounds = false
 ; themes/<name>.ini in the config directory or the data directory
 theme = catppuccin-mocha
 ; Tab bar: auto (shown with two or more tabs) | always | never

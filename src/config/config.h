@@ -19,7 +19,8 @@ typedef struct te_config {
     uint16_t        cols;
     uint16_t        rows;
     uint16_t        padding;          /* logical pixels */
-    float           opacity;          /* 0.1 .. 1.0 */
+    float           opacity;          /* 0.1 .. 1.0: background of the terminal area */
+    bool            transparent_cells;/* coloured cell backgrounds follow opacity too */
     char            theme[128];
     te_tabbar_mode  tab_bar;          /* auto: shown when there is more than one tab */
     float           inactive_dim;     /* 0..0.8: darken panes without focus */

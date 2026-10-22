@@ -64,6 +64,7 @@ struct te_renderer {
     uint32_t     cache_cap, cache_len;
 
     inst_vec     bg, glyphs, deco;
+    inst_vec     tint;                  /* dim and bell: change colour, never alpha */
     inst_vec     ov_rects, ov_glyphs;   /* overlays (toast) drawn above everything */
     uint16_t    *colstyle;              /* per-column highlight style for the current row */
     size_t       colstyle_cap;
@@ -395,6 +396,7 @@ te_err renderer_create(te_renderer **out, te_font *font)
     vec_init(&r->bg, sizeof(rect_inst));
     vec_init(&r->glyphs, sizeof(glyph_inst));
     vec_init(&r->deco, sizeof(rect_inst));
+    vec_init(&r->tint, sizeof(rect_inst));
     vec_init(&r->ov_rects, sizeof(rect_inst));
     vec_init(&r->ov_glyphs, sizeof(glyph_inst));
 
@@ -492,6 +494,7 @@ void renderer_destroy(te_renderer **rp)
     vec_free(&r->bg);
     vec_free(&r->glyphs);
     vec_free(&r->deco);
+    vec_free(&r->tint);
     vec_free(&r->ov_rects);
     vec_free(&r->ov_glyphs);
     TE_FREE(r->colstyle);
@@ -659,7 +662,7 @@ static void draw_pill(te_renderer *r, uint32_t pfg, uint32_t pbg, int area_w, in
     if (x < 0.0f) {
         x = 0.0f;
     }
-    push_rect(&r->ov_rects, x, y, w, h, pbg, pos == PILL_BOTTOM_BAR ? 0.97f : 0.94f);
+    push_rect(&r->ov_rects, x, y, w, h, pbg, 1.0f);   /* UI stays solid on a translucent window */
     if (pos == PILL_BOTTOM_BAR) {
         push_rect(&r->ov_rects, x, y, w, 2.0f, pfg, 0.35f);
     } else {
@@ -887,15 +890,18 @@ static void build(te_renderer *r, const te_term *t, const te_render_opts *o, con
                 fg = mix(fg, bg, 0.45f);
             }
             /* Search matches, then the selection, take over the cell colours. */
+            bool ui_bg = false;   /* search, selection and cursor stay solid */
             bool cur_match = false;
             if (o->search != nullptr && search_cell(o->search, abs, x, &cur_match)) {
                 bg = cur_match ? o->search_cur_bg : o->search_bg;
                 fg = o->search_fg;
                 bg_default = false;
+                ui_bg = true;
             } else if (o->sel != nullptr && sel_contains(o->sel, abs, x)) {
                 bg = o->sel_bg;
                 fg = o->sel_fg;
                 bg_default = false;
+                ui_bg = true;
             }
             if (o->hover != nullptr && url_hit_contains(o->hover, abs, x)) {
                 attrs = (uint16_t)(((unsigned)attrs & ~(unsigned)TE_ATTR_UL_MASK) | ((unsigned)TE_UL_SINGLE << TE_ATTR_UL_SHIFT));
@@ -905,11 +911,13 @@ static void build(te_renderer *r, const te_term *t, const te_render_opts *o, con
                 bg = term_cursor_color(t);
                 fg = o->cursor_text;
                 bg_default = false;
+                ui_bg = true;
             }
+            float bg_alpha = ui_bg || !o->transparent_cells ? 1.0f : TE_CLAMP(o->opacity, 0.0f, 1.0f);
             if (!bg_default && !spacer) {
-                push_rect(&r->bg, px, py, w, ch, bg, 1.0f);
+                push_rect(&r->bg, px, py, w, ch, bg, bg_alpha);
             } else if (!bg_default && spacer && (x == 0 || (line->cells[x - 1].attrs & TE_ATTR_WIDE) == 0)) {
-                push_rect(&r->bg, px, py, cw, ch, bg, 1.0f);
+                push_rect(&r->bg, px, py, cw, ch, bg, bg_alpha);
             }
             if (spacer || (attrs & TE_ATTR_HIDDEN) != 0 || c->cp == 0) {
                 continue;
@@ -978,10 +986,10 @@ static void build(te_renderer *r, const te_term *t, const te_render_opts *o, con
         push_rect(&r->deco, (float)f->width - sw - 2.0f, top, sw, thumb, dfg, 0.35f);
     }
     if (f->bell > 0.0f) {
-        push_rect(&r->deco, 0.0f, 0.0f, (float)f->width, (float)f->height, dfg, 0.12f * f->bell);
+        push_rect(&r->tint, 0.0f, 0.0f, (float)f->width, (float)f->height, dfg, 0.12f * f->bell);
     }
     if (f->dim > 0.0f) {
-        push_rect(&r->ov_rects, 0.0f, 0.0f, (float)f->width, (float)f->height, term_default_bg(t),
+        push_rect(&r->tint, 0.0f, 0.0f, (float)f->width, (float)f->height, term_default_bg(t),
                   TE_CLAMP(f->dim, 0.0f, 0.9f));
     }
     if (f->bar != nullptr) {
@@ -989,7 +997,7 @@ static void build(te_renderer *r, const te_term *t, const te_render_opts *o, con
     }
     if (f->modal != nullptr && f->modal[0] != '\0') {
         /* Dim the terminal so the question stands out. */
-        push_rect(&r->ov_rects, 0.0f, 0.0f, (float)f->width, (float)f->height, term_default_bg(t), 0.6f);
+        push_rect(&r->tint, 0.0f, 0.0f, (float)f->width, (float)f->height, term_default_bg(t), 0.6f);
         draw_pill(r, o->toast_fg, o->toast_bg, f->width, f->height, f->modal, PILL_CENTER, cw, ch, pad);
     } else if (f->toast != nullptr && f->toast[0] != '\0') {
         draw_pill(r, o->toast_fg, o->toast_bg, f->width, f->height, f->toast, PILL_TOP_RIGHT, cw, ch, pad);
@@ -1049,6 +1057,7 @@ static void clear_vectors(te_renderer *r)
     r->bg.len = 0;
     r->glyphs.len = 0;
     r->deco.len = 0;
+    r->tint.len = 0;
     r->ov_rects.len = 0;
     r->ov_glyphs.len = 0;
 }
@@ -1084,6 +1093,13 @@ static void flush_vectors(te_renderer *r, const te_frame *f)
     draw_images(r);
     draw_glyphs(r, &r->glyphs, f);
     draw_rects(r, &r->deco, f);
+    if (r->tint.len > 0) {
+        /* Keep the destination alpha, so dimming a translucent pane does not make
+         * it more opaque, and scale the tint by that alpha to stay premultiplied. */
+        glBlendFuncSeparate(GL_DST_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+        draw_rects(r, &r->tint, f);
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    }
     draw_rects(r, &r->ov_rects, f);
     draw_glyphs(r, &r->ov_glyphs, f);
 }
@@ -1136,6 +1152,7 @@ te_err renderer_draw(te_renderer *r, const te_term *t, const te_render_opts *o, 
     translate(&r->bg, false, dx, dy);
     translate(&r->glyphs, true, dx, dy);
     translate(&r->deco, false, dx, dy);
+    translate(&r->tint, false, dx, dy);
     translate(&r->ov_rects, false, dx, dy);
     translate(&r->ov_glyphs, true, dx, dy);
     for (size_t i = 0; i < r->nimgs; i++) {
@@ -1236,7 +1253,7 @@ void renderer_chrome(te_renderer *r, const te_chrome *c)
                   (float)c->dividers[i][3], c->divider, 1.0f);
     }
     if (c->modal != nullptr && c->modal[0] != '\0') {
-        push_rect(&r->ov_rects, 0.0f, 0.0f, (float)c->win_w, (float)c->win_h, c->dim_bg, 0.6f);
+        push_rect(&r->tint, 0.0f, 0.0f, (float)c->win_w, (float)c->win_h, c->dim_bg, 0.6f);
         draw_pill(r, c->toast_fg, c->toast_bg, c->win_w, c->win_h, c->modal, PILL_CENTER, cw, ch, pad);
     } else if (c->toast != nullptr && c->toast[0] != '\0') {
         float off = (float)c->tab_bar_h;
