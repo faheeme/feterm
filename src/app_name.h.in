@@ -1,0 +1,12 @@
+/* Generated from src/app_name.h.in by the Makefile. Do not edit the copy in build/. */
+#ifndef TE_APP_NAME_H
+#define TE_APP_NAME_H
+
+/* APP_NAME: binary, config and data directories. APP_DISPLAY_NAME: shown to users. */
+#define APP_NAME          "@NAME@"
+#define APP_DISPLAY_NAME  "@DISPLAY_NAME@"
+#define APP_VERSION       "@VERSION@"
+#define APP_ID            "@APP_ID@"
+#define APP_DATADIR       "@DATADIR@"
+
+#endif

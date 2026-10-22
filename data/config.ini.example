@@ -1,0 +1,124 @@
+; Copy to ~/.config/<program-name>/config.ini (the directory follows the program name).
+; Lines starting with ; or # are comments. Comments must be on their own line:
+; values (including regular expressions) may contain ';' and '#'.
+
+[font]
+; Any Fontconfig name, e.g. "JetBrains Mono" or "Fira Code:style=Retina"
+family = monospace
+; Points, 4..96. Ctrl+Shift+= / Ctrl+Shift+- / Ctrl+Shift+0 zoom at runtime.
+size = 11
+; 0.8..2.0
+line_height = 1.0
+
+[window]
+columns = 100
+rows = 30
+; Logical pixels around the grid
+padding = 8
+; 0.1..1.0; values below 1 need a compositor
+opacity = 1.0
+; themes/<name>.ini in the config directory or the data directory
+theme = catppuccin-mocha
+; Tab bar: auto (shown with two or more tabs) | always | never
+tab_bar = auto
+; Darken panes that do not have focus (0 = off, up to 0.8)
+inactive_dim = 0.3
+
+[terminal]
+; Empty: $SHELL, then /etc/passwd, then /bin/sh
+shell =
+term = xterm-256color
+; Lines, 0..1000000
+scrollback = 10000
+bold_is_bright = false
+; none | visual | urgent
+bell = visual
+; Desktop notifications from programs (OSC 9 / 777 / 99), sent with notify-send:
+; unfocused (only when you are not looking at that pane) | always | never
+notifications = unfocused
+
+[cursor]
+; block | beam | underline (applications may override with DECSCUSR)
+shape = block
+blink = true
+; Glide the cursor to its new position instead of jumping
+animate = true
+
+[highlight]
+; auto: pick cisco / arista / juniper from what appears on screen;
+; off; or a profile name (cisco, arista, juniper, network-common) to pin it.
+; Ctrl+Shift+H cycles the mode at runtime.
+mode = auto
+; Profile used in auto mode until a device is recognised ("none" for none)
+fallback = network-common
+; Also highlight full-screen programs such as vim and less
+alt_screen = false
+
+[mouse]
+; Click inside the line you are typing to move the cursor there
+click_to_position = true
+; arrows | emacs (Ctrl-B / Ctrl-F)
+click_keys = arrows
+; Selecting text copies it to the PRIMARY selection (middle-click pastes it)
+copy_on_select = true
+; Characters that count as part of a word for double-click selection,
+; besides letters and digits (so IPs, paths and URLs select in one go)
+word_chars = -_./~:@%+=?&#*
+
+[keys]
+; Up to two bindings per action, comma-separated; "none" removes a binding.
+; Modifiers: ctrl shift alt super. Keys: a-z 0-9 f1-f12 enter escape tab
+; backspace insert delete home end page_up page_down up down left right
+; space equal plus minus comma period slash ...
+copy = ctrl+shift+c
+paste = ctrl+shift+v
+paste_primary = shift+insert
+zoom_in = ctrl+shift+equal, ctrl+shift+plus
+zoom_out = ctrl+shift+minus
+zoom_reset = ctrl+shift+0
+scroll_page_up = shift+page_up
+scroll_page_down = shift+page_down
+scroll_line_up = ctrl+shift+up
+scroll_line_down = ctrl+shift+down
+scroll_top = shift+home
+scroll_bottom = shift+end
+search = ctrl+shift+f
+highlight_cycle = ctrl+shift+h
+reload_config = ctrl+shift+r
+; Jump between shell prompts (needs OSC 133 shell integration)
+prev_prompt = ctrl+shift+z
+next_prompt = ctrl+shift+x
+; Tabs and split panes
+new_tab = ctrl+shift+t
+close_pane = ctrl+shift+w
+next_tab = ctrl+page_down, ctrl+tab
+prev_tab = ctrl+page_up, ctrl+shift+tab
+goto_tab_1 = alt+1
+goto_tab_2 = alt+2
+goto_tab_3 = alt+3
+goto_tab_4 = alt+4
+goto_tab_5 = alt+5
+goto_tab_6 = alt+6
+goto_tab_7 = alt+7
+goto_tab_8 = alt+8
+goto_tab_9 = alt+9
+split_right = ctrl+shift+e
+split_down = ctrl+shift+o
+focus_next_pane = ctrl+shift+bracketright
+focus_prev_pane = ctrl+shift+bracketleft
+resize_left = ctrl+shift+alt+left
+resize_right = ctrl+shift+alt+right
+resize_up = ctrl+shift+alt+up
+resize_down = ctrl+shift+alt+down
+toggle_zoom = ctrl+shift+enter
+; Switch to the next installed theme
+theme_next = ctrl+shift+period
+
+[security]
+; Let programs SET the clipboard via OSC 52 (reading it is never allowed)
+osc52_write = true
+; Strip control characters from pasted text
+paste_sanitize = true
+; Ask before pasting several lines into a program without bracketed paste
+; (each line would run as a command as soon as it is pasted)
+confirm_multiline_paste = true
