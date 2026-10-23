@@ -15,7 +15,7 @@ keepalives, anti-idle and reconnect) and a remote file explorer (SFTP, with an S
 ## Install
 
 FeTerm is packaged in [COPR](https://copr.fedorainfracloud.org/coprs/faheeme/feterm/) for
-Fedora 43, 44, 45 and Rawhide, and for Rocky, AlmaLinux and RHEL 10 (x86_64).
+Fedora 43, 44, 45 and Rawhide, and for Rocky, AlmaLinux and RHEL 10 (x86_64 and aarch64).
 
 Fedora:
 
