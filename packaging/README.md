@@ -33,18 +33,43 @@ a user's build.
    copr-cli build feterm ~/rpmbuild/SRPMS/feterm-X.Y.Z-1.*.src.rpm
    ```
    With automatic builds set up (below), the tag push alone starts the build.
-4. **PPA:**
+4. **PPA** (in the Ubuntu 26.04 distrobox). The `X.Y.Z-1~ppa1` entry must already be at
+   the top of `packaging/debian/changelog` in the tag:
    ```sh
+   cd ~/ppa
    wget -O feterm_X.Y.Z.orig.tar.gz https://gitlab.com/faheeme/feterm/-/archive/vX.Y.Z/feterm-vX.Y.Z.tar.gz
    tar xf feterm_X.Y.Z.orig.tar.gz && cd feterm-vX.Y.Z && cp -r packaging/debian .
-   dch -v X.Y.Z-1~ppa1 "New upstream release"
    debuild -S -sa -k<KEYID>
-   dput ppa:faheeme/feterm ../feterm_X.Y.Z-1~ppa1_source.changes
+   cd .. && dput ppa:faheeme/feterm feterm_X.Y.Z-1~ppa1_source.changes
    ```
-   Copy the `dch` changelog entry back into `packaging/debian/changelog` and commit it.
+   When the 26.04 build succeeds, copy it to 26.10 on Launchpad: *Copy packages*, destination
+   series *Stonking*, **Copy existing binaries**. ("Rebuild" is refused inside the same PPA.)
 
 A fix to the packaging alone (no code change) keeps the version and bumps the package
 release instead: `pkgrel=2`, `Release: 2`, or `-1~ppa2`.
+
+### PPA: packaging-only re-upload
+
+A `~ppa2` (or later) upload reuses the version's original tarball, so it must not change
+anything outside `debian/`. Don't copy `packaging/debian` over itself inside the source
+tree: `dpkg-source` compares the tree with the tarball and stops with "unexpected upstream
+changes". Take the new files from `main` and put them only in `debian/`:
+
+```sh
+cd ~/ppa                                  # still holds feterm_X.Y.Z.orig.tar.gz from the ~ppa1 upload
+rm -rf feterm-vX.Y.Z newdeb
+tar xf feterm_X.Y.Z.orig.tar.gz
+mkdir newdeb
+wget -qO- https://gitlab.com/faheeme/feterm/-/archive/main/feterm-main.tar.gz \
+  | tar xz -C newdeb --strip-components=3 feterm-main/packaging/debian
+cp -r newdeb feterm-vX.Y.Z/debian
+cd feterm-vX.Y.Z && debuild -S -sd -k<KEYID>
+cd .. && dput ppa:faheeme/feterm feterm_X.Y.Z-1~ppa2_source.changes
+```
+
+Use `-sd`, not `-sa`, and the same `.orig.tar.gz` file as before: Launchpad already has that
+tarball and rejects a different one for the same version. Then copy the build to 26.10 as
+above.
 
 ## COPR automatic builds
 
