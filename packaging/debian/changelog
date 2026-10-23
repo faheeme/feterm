@@ -1,3 +1,11 @@
+feterm (0.4.2-1~ppa2) resolute; urgency=medium
+
+  * Provide x-terminal-emulator and register FeTerm as an alternative for it,
+    so installing FeTerm no longer pulls in another terminal through
+    recommended packages.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Fri, 23 Oct 2026 20:58:33 +0200
+
 feterm (0.4.2-1~ppa1) resolute; urgency=medium
 
   * New upstream release: builds on aarch64.

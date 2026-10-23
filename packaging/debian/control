@@ -12,6 +12,7 @@ Package: feterm
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Recommends: openssh-client, xdg-utils, libnotify-bin
+Provides: x-terminal-emulator
 Description: modern terminal emulator with network-device syntax highlighting
  FeTerm is a GPU-rendered terminal emulator for Wayland and X11 with tabs,
  split panes, themes, inline images, an SSH/Telnet/serial session manager,
