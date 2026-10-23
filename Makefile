@@ -9,7 +9,7 @@ DISPLAY_NAME ?= FeTerm
 AUTHOR     ?= Faheem Essack
 EMAIL      ?= faheem.essack@gmail.com
 VERSION    ?= 0.4.0
-APP_ID     ?= io.github.$(NAME)
+APP_ID     ?= io.gitlab.faheeme.$(NAME)
 PREFIX     ?= /usr/local
 DATADIR    ?= $(PREFIX)/share/$(NAME)
 
@@ -23,7 +23,10 @@ GEN        := $(BUILD)/gen
 WARN    := -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow \
            -Wformat=2 -Wformat-security -Wnull-dereference -Wvla -Wcast-qual \
            -Wstrict-prototypes -Wmissing-prototypes -Wimplicit-fallthrough \
-           -Wundef -Werror
+           -Wundef $(WERROR)
+# Warnings are errors by default. Packagers building with newer compilers can
+# pass WERROR= so a new warning doesn't break the build.
+WERROR  ?= -Werror
 HARDEN  := -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection \
            -fcf-protection -fPIE -fno-strict-overflow -fno-delete-null-pointer-checks
 OPT     ?= -O2 -g
@@ -39,7 +42,7 @@ DEP := $(OBJ:.o=.d)
 
 .PHONY: all clean debug analyze install uninstall test
 
-all: $(NAME) $(BUILD)/$(APP_ID).desktop
+all: $(NAME) $(BUILD)/$(APP_ID).desktop $(BUILD)/$(NAME).1
 
 $(GEN)/app_name.h: src/app_name.h.in Makefile
 	@mkdir -p $(@D)
@@ -51,6 +54,13 @@ $(GEN)/app_name.h: src/app_name.h.in Makefile
 $(BUILD)/$(APP_ID).desktop: data/app.desktop.in Makefile
 	@mkdir -p $(@D)
 	sed -e 's|@NAME@|$(NAME)|g' -e 's|@DISPLAY_NAME@|$(DISPLAY_NAME)|g' -e 's|@APP_ID@|$(APP_ID)|g' $< > $@
+
+# Man page, with the same name substitutions.
+$(BUILD)/$(NAME).1: data/app.1.in Makefile
+	@mkdir -p $(@D)
+	sed -e 's|@NAME@|$(NAME)|g' -e 's|@NAME_UPPER@|$(shell echo '$(NAME)' | tr a-z A-Z)|g' \
+	    -e 's|@DISPLAY_NAME@|$(DISPLAY_NAME)|g' -e 's|@VERSION@|$(VERSION)|g' -e 's|@APP_ID@|$(APP_ID)|g' \
+	    -e 's|@DATADIR@|$(DATADIR)|g' -e 's|@AUTHOR@|$(AUTHOR)|g' -e 's|@EMAIL@|$(EMAIL)|g' $< > $@
 
 $(BUILD)/%.o: %.c $(GEN)/app_name.h
 	@mkdir -p $(@D)
@@ -85,12 +95,15 @@ analyze:
 ICON_SIZES := 16 24 32 48 64 128 256 512
 ICONDIR    := $(PREFIX)/share/icons/hicolor
 APPSDIR    := $(PREFIX)/share/applications
+MANDIR     := $(PREFIX)/share/man/man1
 
-install: $(NAME) $(BUILD)/$(APP_ID).desktop
+install: $(NAME) $(BUILD)/$(APP_ID).desktop $(BUILD)/$(NAME).1
 	install -Dm755 $(NAME) $(DESTDIR)$(PREFIX)/bin/$(NAME)
 	install -d $(DESTDIR)$(DATADIR)/themes $(DESTDIR)$(DATADIR)/highlight
 	install -m644 data/themes/*.ini $(DESTDIR)$(DATADIR)/themes/
 	-install -m644 data/highlight/*.ini $(DESTDIR)$(DATADIR)/highlight/
+	install -m644 data/config.ini.example $(DESTDIR)$(DATADIR)/
+	install -Dm644 $(BUILD)/$(NAME).1 $(DESTDIR)$(MANDIR)/$(NAME).1
 	install -Dm644 $(BUILD)/$(APP_ID).desktop $(DESTDIR)$(APPSDIR)/$(APP_ID).desktop
 	for s in $(ICON_SIZES); do \
 	    install -Dm644 data/icons/feterm-$$s.png $(DESTDIR)$(ICONDIR)/$${s}x$$s/apps/$(APP_ID).png || exit 1; \
@@ -104,6 +117,7 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/$(NAME)
 	rm -rf $(DESTDIR)$(DATADIR)
 	rm -f $(DESTDIR)$(APPSDIR)/$(APP_ID).desktop
+	rm -f $(DESTDIR)$(MANDIR)/$(NAME).1
 	for s in $(ICON_SIZES); do rm -f $(DESTDIR)$(ICONDIR)/$${s}x$$s/apps/$(APP_ID).png; done
 	rm -f $(DESTDIR)$(ICONDIR)/scalable/apps/$(APP_ID).svg
 	rm -f $(DESTDIR)$(ICONDIR)/symbolic/apps/$(APP_ID)-symbolic.svg

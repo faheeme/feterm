@@ -23,6 +23,19 @@ sudo dnf install gcc make pkgconf-pkg-config SDL3-devel pcre2-devel freetype-dev
 
 EL10 / Rocky 10: run `sudo dnf config-manager --set-enabled crb` first, then the same command.
 
+Arch / Omarchy:
+
+```sh
+sudo pacman -S --needed base-devel sdl3 pcre2 freetype2 fontconfig libglvnd
+```
+
+Ubuntu 26.04 / Debian (SDL3 is not packaged in Ubuntu 24.04):
+
+```sh
+sudo apt install build-essential pkgconf libsdl3-dev libpcre2-dev libfreetype-dev \
+                 libfontconfig-dev libgles-dev
+```
+
 ```sh
 make            # ./feterm
 make test       # headless core tests under ASan + UBSan
@@ -31,12 +44,17 @@ make analyze    # GCC -fanalyzer over all sources
 sudo make install PREFIX=/usr/local
 ```
 
-`make install` also installs the launcher entry (`io.github.feterm.desktop`) and the icons
+`make install` also installs the man page (`man feterm`), `config.ini.example` in the data
+directory, the launcher entry (`io.gitlab.faheeme.feterm.desktop`) and the icons
 into the hicolor theme: PNGs from 16 to 512 px, a scalable SVG and a symbolic panel icon.
 The window's app-id matches the launcher's name, so docks and task switchers show the icon
 on Wayland and X11.
 
 Run from the source tree with `./feterm`: themes are found in `./data` next to the binary.
+
+Warnings are errors by default. `make WERROR=` turns that off, for example when a newer
+compiler adds a warning. The distribution packages in `packaging/` (AUR, COPR, PPA) build
+this way.
 
 ## Usage
 

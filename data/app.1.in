@@ -1,0 +1,144 @@
+.TH @NAME_UPPER@ 1 "" "@DISPLAY_NAME@ @VERSION@" "User Commands"
+.SH NAME
+@NAME@ \- terminal emulator with syntax highlighting for network devices
+.SH SYNOPSIS
+.B @NAME@
+.RB [ \-d
+.IR DIR ]
+.RB [ \-c
+.IR CONFIG ]
+.RB [ \-T
+.IR TITLE ]
+.RB [ \-\-class
+.IR ID ]
+.RB [ \-\-hold ]
+.RB [ \-\-verbose ]
+.RB [ \-e
+.IR command " [" args ...]]
+.SH DESCRIPTION
+.B @DISPLAY_NAME@
+is a GPU-rendered terminal emulator for Wayland and X11. It has tabs, split
+panes, themes, true transparency, inline images (sixel and kitty graphics), the
+kitty keyboard protocol and desktop notifications.
+.PP
+Output from Cisco, Arista and Juniper devices is highlighted with PCRE2 rules
+read from
+.I .ini
+profiles. The profile is chosen automatically from what appears on screen.
+.PP
+A sidebar holds saved SSH, Telnet, serial and local sessions in folders, and a
+file explorer that browses the focused SSH session's server over SFTP (or SCP
+when the device has no SFTP).
+.PP
+Clicking in the line you are typing moves the cursor there.
+.SH OPTIONS
+.TP
+.BR \-e ", " \-\-exec " \fIcommand\fR [\fIargs\fR...]"
+Run
+.I command
+instead of the login shell. This must be the last option; everything after it
+is passed to the command.
+.TP
+.BR \-d ", " \-\-directory " \fIDIR\fR"
+Start in
+.IR DIR .
+.TP
+.BR \-c ", " \-\-config " \fIFILE\fR"
+Read
+.I FILE
+instead of
+.IR ~/.config/@NAME@/config.ini .
+.TP
+.BR \-T ", " \-\-title " \fITITLE\fR"
+Set the initial window title.
+.TP
+.BI \-\-class " ID"
+Set the application id (Wayland) or WM_CLASS (X11). The default is
+.BR @APP_ID@ .
+.TP
+.B \-\-hold
+Keep panes open after their command exits.
+.TP
+.B \-\-verbose
+Print debug logging to standard error.
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Print a short usage summary and exit.
+.SH KEYS
+These are the defaults. Every shortcut can be changed in the
+.B [keys]
+section of
+.IR config.ini .
+.TP
+.B Ctrl+Shift+C, Ctrl+Shift+V
+Copy the selection, paste the clipboard.
+.TP
+.B Shift+Insert, middle click
+Paste the primary selection.
+.TP
+.B Ctrl+Shift+F
+Search the scrollback (regex).
+.TP
+.B Ctrl+Shift+T, Ctrl+Shift+W
+New tab, close pane.
+.TP
+.B Ctrl+Shift+E, Ctrl+Shift+O
+Split right, split down.
+.TP
+.B Ctrl+Shift+H
+Cycle highlighting: auto, off, then each profile.
+.TP
+.B Ctrl+Shift+R
+Reload the configuration (also automatic when files change).
+.TP
+.B Ctrl+Shift+.
+Switch to the next installed theme.
+.TP
+.B Ctrl+Shift+B
+Show or hide the sidebar.
+.TP
+.B Ctrl+Shift+N
+Quick connect (SSH, Telnet or serial without saving).
+.TP
+.B Ctrl+Shift+=, Ctrl+Shift+-, Ctrl+Shift+0
+Zoom in, zoom out, reset.
+.SH FILES
+.TP
+.I ~/.config/@NAME@/config.ini
+Main configuration. An annotated example is installed as
+.IR @DATADIR@/config.ini.example .
+.TP
+.I ~/.config/@NAME@/themes/
+Your own themes. Bundled themes are in
+.IR @DATADIR@/themes/ .
+.TP
+.I ~/.config/@NAME@/highlight/
+Your own highlighting profiles. A file with the same profile name as a bundled
+one in
+.I @DATADIR@/highlight/
+replaces it.
+.TP
+.I ~/.config/@NAME@/sessions/
+Saved sessions, one
+.I .ini
+file per session (mode 0600). Passwords are never stored.
+.PP
+.B $XDG_CONFIG_HOME
+is used instead of
+.I ~/.config
+when it is set.
+.SH ENVIRONMENT
+Programs started in the terminal see
+.BR TERM=xterm-256color ,
+.B COLORTERM=truecolor
+and
+.BR TERM_PROGRAM=@DISPLAY_NAME@ .
+.SH SEE ALSO
+.BR ssh (1),
+.BR sftp (1),
+.BR scp (1)
+.SH AUTHOR
+@AUTHOR@ <@EMAIL@>
