@@ -12,6 +12,35 @@ animation, 12 themes, true transparency, and inline images (sixel and kitty grap
 The sidebar has a session manager (SSH, Telnet, serial and local sessions in folders, with
 keepalives, anti-idle and reconnect) and a remote file explorer (SFTP, with an SCP fallback).
 
+## Install
+
+FeTerm is packaged in [COPR](https://copr.fedorainfracloud.org/coprs/faheeme/feterm/) for
+Fedora 43, 44, 45 and Rawhide, and for Rocky, AlmaLinux and RHEL 10 (x86_64).
+
+Fedora:
+
+```sh
+sudo dnf copr enable faheeme/feterm
+sudo dnf install feterm
+```
+
+Rocky / AlmaLinux / RHEL 10 (EPEL and CRB are not needed):
+
+```sh
+sudo dnf install dnf-plugins-core
+sudo dnf copr enable faheeme/feterm
+sudo dnf install feterm
+```
+
+Updates arrive with `sudo dnf upgrade`. To remove FeTerm and the repo:
+
+```sh
+sudo dnf remove feterm
+sudo dnf copr remove faheeme/feterm
+```
+
+On other distributions, build it from source as described below.
+
 ## Build
 
 Fedora:
