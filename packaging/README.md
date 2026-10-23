@@ -32,8 +32,7 @@ a user's build.
    spectool -g -R feterm.spec && rpmbuild -bs feterm.spec
    copr-cli build feterm ~/rpmbuild/SRPMS/feterm-X.Y.Z-1.*.src.rpm
    ```
-   With the COPR webhook in GitLab (Settings → Webhooks, "Tag push events"), the tag push
-   alone starts the build.
+   With automatic builds set up (below), the tag push alone starts the build.
 4. **PPA:**
    ```sh
    wget -O feterm_X.Y.Z.orig.tar.gz https://gitlab.com/faheeme/feterm/-/archive/vX.Y.Z/feterm-vX.Y.Z.tar.gz
@@ -46,3 +45,23 @@ a user's build.
 
 A fix to the packaging alone (no code change) keeps the version and bumps the package
 release instead: `pkgrel=2`, `Release: 2`, or `-1~ppa2`.
+
+## COPR automatic builds
+
+`.copr/Makefile` builds the source RPM from the tag's GitLab archive. It refuses to build if
+the spec's `Version:` doesn't match `VERSION` in the Makefile. To set it up once:
+
+1. In the COPR project, open *Packages → New package → SCM* and fill in:
+   - Package name: `feterm`
+   - Clone url: `https://gitlab.com/faheeme/feterm.git`
+   - Committish and Subdirectory: leave empty
+   - Spec File: `packaging/rpm/feterm.spec`
+   - How to build SRPM from the source: **make srpm**
+   - Tick **Auto-rebuild**, then *Submit*.
+2. In the COPR project, open *Settings → Integrations* and copy the **GitLab** webhook URL.
+3. In GitLab, open *Settings → Webhooks → Add new webhook*. Paste the URL, tick only
+   **Tag push events** (untick *Push events*, so ordinary commits don't trigger builds),
+   then *Add webhook*.
+
+For aarch64, add the `-aarch64` chroots too. The Makefile picks the control-flow protection
+flag for the CPU: `-fcf-protection` on x86, `-mbranch-protection=standard` on ARM64.

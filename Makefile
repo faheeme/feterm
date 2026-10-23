@@ -27,8 +27,12 @@ WARN    := -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow \
 # Warnings are errors by default. Packagers building with newer compilers can
 # pass WERROR= so a new warning doesn't break the build.
 WERROR  ?= -Werror
+# Control-flow protection has a different flag on each CPU (CET on x86, PAC/BTI
+# on ARM64); other CPUs build without it.
+TARGET  := $(shell $(CC) -dumpmachine)
+CFPROT  := $(if $(filter x86_64-% i%86-%,$(TARGET)),-fcf-protection,$(if $(filter aarch64-%,$(TARGET)),-mbranch-protection=standard))
 HARDEN  := -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection \
-           -fcf-protection -fPIE -fno-strict-overflow -fno-delete-null-pointer-checks
+           $(CFPROT) -fPIE -fno-strict-overflow -fno-delete-null-pointer-checks
 OPT     ?= -O2 -g
 
 CPPFLAGS += -D_GNU_SOURCE -I$(GEN) -Isrc
