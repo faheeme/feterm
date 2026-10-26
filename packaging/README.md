@@ -33,43 +33,50 @@ a user's build.
    copr-cli build feterm ~/rpmbuild/SRPMS/feterm-X.Y.Z-1.*.src.rpm
    ```
    With automatic builds set up (below), the tag push alone starts the build.
-4. **PPA** (in the Ubuntu 26.04 distrobox). The `X.Y.Z-1~ppa1` entry must already be at
-   the top of `packaging/debian/changelog` in the tag:
-   ```sh
-   cd ~/ppa
-   wget -O feterm_X.Y.Z.orig.tar.gz https://gitlab.com/faheeme/feterm/-/archive/vX.Y.Z/feterm-vX.Y.Z.tar.gz
-   tar xf feterm_X.Y.Z.orig.tar.gz && cd feterm-vX.Y.Z && cp -r packaging/debian .
-   debuild -S -sa -k<KEYID>
-   cd .. && dput ppa:faheeme/feterm feterm_X.Y.Z-1~ppa1_source.changes
-   ```
-   When the 26.04 build succeeds, copy it to 26.10 on Launchpad: *Copy packages*, destination
-   series *Stonking*, **Copy existing binaries**. ("Rebuild" is refused inside the same PPA.)
+4. **PPA:** `packaging/ppa-upload.sh vX.Y.Z` (see *PPA uploads* below), run by hand or by
+   a build server after the tag push. The `X.Y.Z-1~ppa1` entry must already be at the top of
+   `packaging/debian/changelog` in the tag, or the script stops and says so. Each Ubuntu
+   series gets its own upload, `X.Y.Z-1~ppa1~26.04.1` and `~26.10.1`, built against its own
+   libraries, so nothing has to be copied between series on Launchpad.
 
 A fix to the packaging alone (no code change) keeps the version and bumps the package
 release instead: `pkgrel=2`, `Release: 2`, or `-1~ppa2`.
 
-### PPA: packaging-only re-upload
+## PPA uploads
 
-A `~ppa2` (or later) upload reuses the version's original tarball, so it must not change
-anything outside `debian/`. Don't copy `packaging/debian` over itself inside the source
-tree: `dpkg-source` compares the tree with the tarball and stops with "unexpected upstream
-changes". Take the new files from `main` and put them only in `debian/`:
+`packaging/ppa-upload.sh` builds and signs one source package per series and uploads it
+with `dput`; Launchpad then builds amd64 and arm64. A series whose version is already in the
+PPA is skipped, so running it again only uploads what is missing. With `PPA_DRY_RUN=1` it
+builds and signs without uploading. The signed files are left in `ppa-out/out/`.
+
+### Uploading by hand
+
+The same script works in the Ubuntu distrobox with your own keyring. It asks for the
+key's passphrase:
 
 ```sh
-cd ~/ppa                                  # still holds feterm_X.Y.Z.orig.tar.gz from the ~ppa1 upload
-rm -rf feterm-vX.Y.Z newdeb
-tar xf feterm_X.Y.Z.orig.tar.gz
-mkdir newdeb
-wget -qO- https://gitlab.com/faheeme/feterm/-/archive/main/feterm-main.tar.gz \
-  | tar xz -C newdeb --strip-components=3 feterm-main/packaging/debian
-cp -r newdeb feterm-vX.Y.Z/debian
-cd feterm-vX.Y.Z && debuild -S -sd -k<KEYID>
-cd .. && dput ppa:faheeme/feterm feterm_X.Y.Z-1~ppa2_source.changes
+cd ~/feterm && git pull
+PPA_GPG_KEY_ID=<FINGERPRINT> packaging/ppa-upload.sh vX.Y.Z
 ```
 
-Use `-sd`, not `-sa`, and the same `.orig.tar.gz` file as before: Launchpad already has that
-tarball and rejects a different one for the same version. Then copy the build to 26.10 as
-above.
+### Packaging-only re-upload (~ppa2)
+
+A re-upload keeps the version, so it must reuse the exact tarball Launchpad already has
+for it, and take `debian/` from `main` instead of from the tag. Add the new top entry
+(`X.Y.Z-1~ppa2`) to `packaging/debian/changelog`, commit and push it, then:
+
+```sh
+cd ~/feterm && git pull
+PPA_GPG_KEY_ID=<FINGERPRINT> PPA_ORIG=~/ppa/feterm_X.Y.Z.orig.tar.gz \
+    PPA_DEBIAN_DIR=packaging/debian packaging/ppa-upload.sh vX.Y.Z
+```
+
+`PPA_ORIG` must be the tarball from the first upload of that version. If you no longer
+have it, download it from the PPA page (*View package details*, then the version, then the
+`.orig.tar.gz` link). A freshly downloaded GitLab archive may not be byte-identical, and
+Launchpad rejects a different tarball for a version it already has. Don't copy
+`packaging/debian` over itself inside an unpacked tree: `dpkg-source` then stops with
+"unexpected upstream changes", because the tree no longer matches the tarball.
 
 ## COPR automatic builds
 
