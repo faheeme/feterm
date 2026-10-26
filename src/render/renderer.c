@@ -51,6 +51,7 @@ typedef struct inst_vec {
 
 struct te_renderer {
     te_font     *font;
+    te_font     *ui_font;               /* sidebar, menus, dialogs; nullptr: font */
     GLuint       prog_rect, prog_glyph;
     GLint        u_rect_vp, u_glyph_vp, u_glyph_atlas, u_glyph_atlas_size;
     GLuint       vao_rect, vao_glyph;
@@ -246,8 +247,37 @@ static void attrib(GLuint loc, GLint n, GLsizei stride, size_t offset, GLuint di
 /* ------------------------------------------------------------------------- */
 /* Glyph cache and atlas */
 
+/* Zero the atlas, so a new glyph never sits next to a stale one's pixels. */
+static void atlas_wipe(te_renderer *r)
+{
+    if (r->atlas == 0) {
+        return;
+    }
+    GLint prev = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev);
+    GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    GLuint fbo = 0;
+    glGenFramebuffers(1, &fbo);
+    if (fbo == 0) {
+        return;
+    }
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, r->atlas, 0);
+    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) {
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        if (scissor) {
+            glEnable(GL_SCISSOR_TEST);
+        }
+    }
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)prev);
+    glDeleteFramebuffers(1, &fbo);
+}
+
 static void cache_clear(te_renderer *r)
 {
+    atlas_wipe(r);
     if (r->cache != nullptr) {
         memset(r->cache, 0, (size_t)r->cache_cap * sizeof *r->cache);
     }
@@ -329,10 +359,13 @@ static bool atlas_alloc(te_renderer *r, int w, int h, int *x, int *y)
     return true;
 }
 
-/* Look up (or rasterise and upload) a glyph. Returns nullptr if it cannot be drawn now. */
-static const glyph *get_glyph(te_renderer *r, uint32_t cp, unsigned style, bool wide)
+/* Look up (or rasterise and upload) a glyph of the terminal font, or of the UI
+ * font when ui is set. Returns nullptr if it cannot be drawn now. */
+static const glyph *get_glyph_in(te_renderer *r, bool ui, uint32_t cp, unsigned style, bool wide)
 {
-    uint32_t key = (cp & 0x1FFFFFu) | ((uint32_t)(style & 3u) << 21) | (wide ? 1u << 23 : 0u);
+    te_font *font = ui && r->ui_font != nullptr ? r->ui_font : r->font;
+    uint32_t key = (cp & 0x1FFFFFu) | ((uint32_t)(style & 3u) << 21) | (wide ? 1u << 23 : 0u) |
+                   (font != r->font ? 1u << 24 : 0u);
     if ((r->cache_len + 1u) * 2u > r->cache_cap && !cache_grow(r)) {
         if (r->cache_len + 1u >= r->cache_cap) {
             r->atlas_full = true;   /* forces a full reset next frame */
@@ -349,10 +382,10 @@ static const glyph *get_glyph(te_renderer *r, uint32_t cp, unsigned style, bool 
     if (r->atlas_full) {
         return nullptr;
     }
-    const te_font_metrics *m = font_metrics(r->font);
+    const te_font_metrics *m = font_metrics(font);
     te_raster ras = { 0 };
     glyph g = { 0 };
-    te_err rc = font_rasterize(r->font, cp, style, wide ? m->cell_w * 2 : m->cell_w, &ras);
+    te_err rc = font_rasterize(font, cp, style, wide ? m->cell_w * 2 : m->cell_w, &ras);
     if (rc == TE_OK && ras.w > 0 && ras.h > 0) {
         int ax = 0;
         int ay = 0;
@@ -376,6 +409,11 @@ static const glyph *get_glyph(te_renderer *r, uint32_t cp, unsigned style, bool 
     e->g = g;
     r->cache_len++;
     return &e->g;
+}
+
+static const glyph *get_glyph(te_renderer *r, uint32_t cp, unsigned style, bool wide)
+{
+    return get_glyph_in(r, false, cp, style, wide);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -510,6 +548,20 @@ void renderer_set_font(te_renderer *r, te_font *font)
     }
     r->font = font;
     cache_clear(r);
+}
+
+void renderer_set_ui_font(te_renderer *r, te_font *font)
+{
+    if (r == nullptr) {
+        return;
+    }
+    r->ui_font = font;
+    cache_clear(r);
+}
+
+static te_font *ui_font(const te_renderer *r)
+{
+    return r->ui_font != nullptr ? r->ui_font : r->font;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1319,7 +1371,7 @@ static void ui_text_cb(void *user, te_layer layer, float x, float y, const char 
                        bool bold)
 {
     te_renderer *r = user;
-    const te_font_metrics *m = font_metrics(r->font);
+    const te_font_metrics *m = font_metrics(ui_font(r));
     inst_vec *v = layer == TE_LAYER_OVERLAY ? &r->ov_glyphs : &r->glyphs;
     size_t col = 0;
     te_utf8_dec d = { 0 };
@@ -1340,7 +1392,7 @@ static void ui_text_cb(void *user, te_layer layer, float x, float y, const char 
             break;
         }
         if (cp != ' ') {
-            const glyph *g = get_glyph(r, cp, bold ? TE_FONT_BOLD : TE_FONT_REGULAR, w == 2);
+            const glyph *g = get_glyph_in(r, true, cp, bold ? TE_FONT_BOLD : TE_FONT_REGULAR, w == 2);
             if (g != nullptr && g->present) {
                 push_glyph(v, g, x + (float)col * (float)m->cell_w + (float)g->left,
                            y + (float)m->baseline - (float)g->top, rgb, 1.0f);
@@ -1352,7 +1404,7 @@ static void ui_text_cb(void *user, te_layer layer, float x, float y, const char 
 
 void renderer_painter(te_renderer *r, float scale, te_painter *out)
 {
-    const te_font_metrics *m = font_metrics(r->font);
+    const te_font_metrics *m = font_metrics(ui_font(r));
     *out = (te_painter){
         .user = r,
         .cell_w = (float)m->cell_w,

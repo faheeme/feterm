@@ -72,6 +72,7 @@ typedef struct app {
     te_theme      theme;
     te_platform  *plat;
     te_font      *font;
+    te_font      *ui_font;      /* sidebar, menus, dialogs: the configured size, never zoomed */
     te_renderer  *ren;
     te_layout     layout;
     uint32_t      next_pane_id;
@@ -354,6 +355,23 @@ static void apply_size(app *a)
     }
     font_destroy(&a->font);
     a->font = nf;
+    return TE_OK;
+}
+
+/* The UI font follows the configured size and the DPI, never the zoom. */
+[[nodiscard]] static te_err load_ui_font(app *a)
+{
+    float px = a->cfg.font_size * 96.0f / 72.0f * a->scale;
+    te_font *nf = nullptr;
+    te_err rc = font_create(&nf, a->cfg.font_family, px, a->cfg.line_height);
+    if (rc != TE_OK) {
+        return rc;
+    }
+    if (a->ren != nullptr) {
+        renderer_set_ui_font(a->ren, nf);
+    }
+    font_destroy(&a->ui_font);
+    a->ui_font = nf;
     return TE_OK;
 }
 
@@ -1205,6 +1223,8 @@ static void reload_config(app *a)
             (void)str_copy(a->cfg.font_family, sizeof a->cfg.font_family, old.font_family);
             a->cfg.line_height = old.line_height;
             a->font_pt = old_pt;
+        } else if (load_ui_font(a) != TE_OK) {
+            LOG_W("could not load the sidebar font; keeping the previous one");
         }
     }
     te_pane *all[MAX_PANES] = { 0 };
@@ -1923,6 +1943,8 @@ static void handle_event(app *a, const te_event *ev)
             a->scale = s;
             if (load_font(a) != TE_OK) {
                 a->scale = old;
+            } else if (load_ui_font(a) != TE_OK) {
+                LOG_W("could not reload the sidebar font for the new scale");
             }
             apply_size(a);
         }
@@ -2204,6 +2226,7 @@ static void app_destroy(app *a)
     TE_FREE(a->pending_paste);
     spawn_reap();
     renderer_destroy(&a->ren);
+    font_destroy(&a->ui_font);
     font_destroy(&a->font);
     plat_destroy(&a->plat);
 }
@@ -2352,6 +2375,9 @@ int main(int argc, char **argv)
     if (err != TE_OK) {
         LOG_E("cannot initialise the renderer: %s", te_strerror(err));
         goto out;
+    }
+    if (load_ui_font(&a) != TE_OK) {
+        LOG_W("could not load the sidebar font; it will zoom with the terminal");
     }
 
     /* Sessions: the sidebar, this program's path (for the helpers) and a private

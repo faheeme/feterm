@@ -70,6 +70,9 @@ typedef struct te_renderer te_renderer;
 void renderer_destroy(te_renderer **r);
 /* Switch to a new font (zoom, DPI change). The renderer does not own the font. */
 void renderer_set_font(te_renderer *r, te_font *font);
+/* Font for the sidebar, menus and dialogs, which do not zoom with the terminal.
+ * nullptr: use the terminal font. The renderer does not own it. */
+void renderer_set_ui_font(te_renderer *r, te_font *font);
 /* Start a frame: clear the whole window. */
 void renderer_begin(te_renderer *r, int win_w, int win_h, uint32_t bg, float opacity);
 /* Draw one pane at f->x, f->y (size f->width x f->height), clipped to its rectangle. */
@@ -84,7 +87,7 @@ bool renderer_animating(const te_renderer *r);
 int renderer_tab_at(const te_renderer *r, const te_chrome *c, int x, int y);
 
 /*
- * Free-form UI (sidebar, menus, dialogs) drawn on top of everything else:
+ * Free-form UI (sidebar, menus, dialogs) drawn on top of everything else, in the UI font:
  * renderer_ui_begin, then draw through the painter, then renderer_ui_end.
  */
 void renderer_painter(te_renderer *r, float scale, te_painter *out);
