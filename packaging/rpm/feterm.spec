@@ -1,5 +1,5 @@
 Name:           feterm
-Version:        0.4.2
+Version:        0.4.3
 Release:        1%{?dist}
 Summary:        Modern terminal emulator with network-device syntax highlighting
 License:        MIT
@@ -42,6 +42,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.gitlab.faheeme.%{n
 %{_datadir}/icons/hicolor/*/apps/io.gitlab.faheeme.%{name}*
 
 %changelog
+* Mon Oct 26 2026 Faheem Essack <faheem.essack@gmail.com> - 0.4.3-1
+- New upstream release: zooming no longer resizes the sidebar
+
 * Fri Oct 23 2026 Faheem Essack <faheem.essack@gmail.com> - 0.4.2-1
 - New upstream release: builds on aarch64
 
