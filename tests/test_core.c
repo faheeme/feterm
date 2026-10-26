@@ -34,6 +34,24 @@ static int g_pass = 0;
     else { g_fail++; fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
 
+/* "<temp dir>/<stem>-XXXXXX" for mkstemp()/mkdtemp(): /tmp, or %TEMP% on Windows. */
+static char *tmp_template(char *out, size_t outsz, const char *stem)
+{
+    char base[400] = "/tmp";
+#ifdef _WIN32
+    const char *t = getenv("TEMP");
+    if (t != nullptr && str_copy(base, sizeof base, t) == TE_OK) {
+        for (char *c = base; *c != '\0'; c++) {
+            if (*c == '\\') *c = '/';
+        }
+    }
+#endif
+    if (str_fmt(out, outsz, "%s/%s-XXXXXX", base, stem) != TE_OK) {
+        out[0] = '\0';
+    }
+    return out;
+}
+
 static void feed(te_term *t, const char *s)
 {
     term_feed(t, (const uint8_t *)s, strlen(s));
@@ -382,7 +400,8 @@ static te_err ini_cb(void *u, const char *sec, const char *key, const char *val,
 
 static void test_ini(void)
 {
-    char path[] = "/tmp/te-ini-XXXXXX";
+    char path[512];
+    (void)tmp_template(path, sizeof path, "te-ini");
     int fd = mkstemp(path);
     CHECK(fd >= 0);
     if (fd < 0) return;
@@ -424,23 +443,27 @@ static void test_config_transparency(void)
     CHECK(!c.transparent_cells);
 
     /* Out-of-range and malformed values are rejected and leave the defaults. */
-    char bad[] = "/tmp/te-cfg-XXXXXX";
+    char bad[512];
+    (void)tmp_template(bad, sizeof bad, "te-cfg");
     CHECK(write_tmp(bad, "[window]\nopacity = 0.05\ntransparent_cell_backgrounds = maybe\n"));
     CHECK(config_load(&c, bad) == TE_OK);
     CHECK(c.opacity > 0.899f && c.opacity < 0.901f && !c.transparent_cells);
     unlink(bad);
-    char high[] = "/tmp/te-cfg-XXXXXX";
+    char high[512];
+    (void)tmp_template(high, sizeof high, "te-cfg");
     CHECK(write_tmp(high, "[window]\nopacity = 1.5\n"));
     CHECK(config_load(&c, high) == TE_OK);
     CHECK(c.opacity > 0.899f && c.opacity < 0.901f);
     unlink(high);
 
-    char good[] = "/tmp/te-cfg-XXXXXX";
+    char good[512];
+    (void)tmp_template(good, sizeof good, "te-cfg");
     CHECK(write_tmp(good, "[window]\nopacity = 0.75\ntransparent_cell_backgrounds = true\n"));
     CHECK(config_load(&c, good) == TE_OK);
     CHECK(c.opacity > 0.749f && c.opacity < 0.751f && c.transparent_cells);
     unlink(good);
-    char off[] = "/tmp/te-cfg-XXXXXX";
+    char off[512];
+    (void)tmp_template(off, sizeof off, "te-cfg");
     CHECK(write_tmp(off, "[window]\nopacity = 1.0\ntransparent_cell_backgrounds = false\n"));
     CHECK(config_load(&c, off) == TE_OK);
     CHECK(c.opacity > 0.999f && !c.transparent_cells);
@@ -487,7 +510,7 @@ static bool setup_hl_dir(void)
 {
     char cwd[512] = { 0 };
     if (getcwd(cwd, sizeof cwd) == nullptr) return false;
-    if (str_copy(g_hl_root, sizeof g_hl_root, "/tmp/te-hl-XXXXXX") != TE_OK || mkdtemp(g_hl_root) == nullptr) {
+    if (tmp_template(g_hl_root, sizeof g_hl_root, "te-hl")[0] == '\0' || mkdtemp(g_hl_root) == nullptr) {
         return false;
     }
     char dir[600] = { 0 };
@@ -501,7 +524,11 @@ static bool setup_hl_dir(void)
         char dst[800] = { 0 };
         (void)str_fmt(src, sizeof src, "%s/data/highlight/%s", cwd, files[i]);
         (void)str_fmt(dst, sizeof dst, "%s/%s", dir, files[i]);
+#ifdef _WIN32
+        if (!CopyFileA(src, dst, TRUE)) return false;
+#else
         if (symlink(src, dst) != 0) return false;
+#endif
     }
     char redos[800] = { 0 };
     (void)str_fmt(redos, sizeof redos, "%s/zz-redos.ini", dir);
@@ -510,7 +537,11 @@ static bool setup_hl_dir(void)
     fprintf(fp, "[profile]\nname = zz-redos\n[rule.evil]\nregex = ^(a|a)+$\nfg = red\n"
                 "[rule.bad-regex]\nregex = (unclosed\n[rule.ok]\nregex = b\nfg = blue\n");
     fclose(fp);
+#ifdef _WIN32
+    return setenv("APPDATA", g_hl_root, 1) == 0;   /* the config base on Windows */
+#else
     return setenv("XDG_CONFIG_HOME", g_hl_root, 1) == 0;
+#endif
 }
 
 static void test_highlight(void)

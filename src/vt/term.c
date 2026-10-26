@@ -373,7 +373,7 @@ static void reply_raw(te_term *t, const char *s, size_t len)
     t->out_len += len;
 }
 
-__attribute__((format(printf, 2, 3)))
+TE_PRINTF(2, 3)
 static void reply(te_term *t, const char *fmt, ...)
 {
     char buf[512] = { 0 };

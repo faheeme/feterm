@@ -6,10 +6,20 @@
 #include <sys/types.h>
 #include "common.h"
 
+#ifdef _WIN32
+/* Windows: a ConPTY with its reader and exit-watcher threads (pty_win.c). */
+typedef struct te_conpty te_conpty;
+typedef struct te_pty {
+    te_conpty *con;    /* nullptr when closed */
+} te_pty;
+/* Event that is set while output is waiting (for plat_watch_handle). */
+void *pty_ready_handle(const te_pty *p);
+#else
 typedef struct te_pty {
     int   master_fd;   /* -1 when closed */
     pid_t child;       /* -1 when no child */
 } te_pty;
+#endif
 
 typedef struct te_pty_opts {
     const char  *const *argv;  /* nullptr: run the user's login shell */
@@ -29,6 +39,8 @@ void pty_init(te_pty *p);
 /* Non-blocking write; returns bytes written (may be short or 0), -1 on fatal error. */
 [[nodiscard]] ssize_t pty_write(te_pty *p, const void *buf, size_t len);
 
+/* Ask a --serial-helper or --telnet-helper child to send a Break. */
+void pty_send_break(te_pty *p);
 /* Reap the child if it exited. Returns true if it has exited; *status gets the exit code. */
 bool pty_reap(te_pty *p, int *status);
 

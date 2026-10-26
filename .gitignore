@@ -2,7 +2,11 @@
 /build/
 /build-debug/
 /build-analyze/
+/build-windows/
 /feterm
+/feterm.exe
+/feterm-helper.exe
+/dist/
 
 # Local helper scripts (icon generator); not part of the project
 /tools/

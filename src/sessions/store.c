@@ -12,6 +12,7 @@
 #include "config/ini.h"
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/os.h"
 #include "util/str.h"
 
 #define FOLDER_FILE    "_folder.ini"
@@ -390,7 +391,7 @@ te_err store_reload(te_store *st)
 
 te_err store_open(te_store *st, const char *root)
 {
-    if (st == nullptr || root == nullptr || root[0] != '/') {
+    if (st == nullptr || !os_path_is_absolute(root)) {
         return TE_ERR_INVAL;
     }
     memset(st, 0, sizeof *st);

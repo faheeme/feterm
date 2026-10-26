@@ -38,6 +38,7 @@
 #include "ui/url.h"
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/os.h"
 #include "util/spawn.h"
 #include "util/str.h"
 #include "vt/term.h"
@@ -257,6 +258,14 @@ static const char *pane_title(const te_pane *p)
 {
     const char *t = term_title(p->term);
     if (t != nullptr && t[0] != '\0') {
+#ifdef _WIN32
+        /* ConPTY titles a console with its program's full path: show just "pwsh.exe". */
+        size_t n = strlen(t);
+        const char *slash = strrchr(t, '\\');
+        if (slash != nullptr && n > 4 && _stricmp(t + n - 4, ".exe") == 0 && os_path_is_absolute(t)) {
+            return slash + 1;
+        }
+#endif
         return t;
     }
     return p->sess != nullptr ? p->sess->s.name : "shell";
@@ -498,6 +507,16 @@ static te_pane *pane_by_id(const app *a, uint32_t id)
     return nullptr;
 }
 
+/* The pane's output: the pty descriptor (POSIX) or the ConPTY reader's ready event (Windows). */
+static te_err watch_pty(app *a, te_pane *p)
+{
+#ifdef _WIN32
+    return plat_watch_handle(a->plat, pty_ready_handle(&p->pty), &p->tag);
+#else
+    return plat_watch_fd(a->plat, p->pty.master_fd, &p->tag);
+#endif
+}
+
 /* Start a shell (or the -e command for the very first pane) in cwd. */
 static te_pane *spawn_pane(app *a, const char *cwd, const char *const *argv)
 {
@@ -537,7 +556,7 @@ static te_pane *spawn_pane(app *a, const char *cwd, const char *const *argv)
         show_toast(a, "Could not start a shell");
         return nullptr;
     }
-    if (plat_watch_fd(a->plat, p->pty.master_fd, &p->tag) != TE_OK) {
+    if (watch_pty(a, p) != TE_OK) {
         LOG_E("cannot watch the pty");
         pane_destroy(&p);
         return nullptr;
@@ -743,7 +762,7 @@ static void reconnect_pane(app *a, te_pane *p)
     pane_note(p, "\r\n\x1b[2m[Reconnecting...]\x1b[0m\r\n");
     const te_launch *l = &p->sess->launch;
     te_err rc = pane_respawn(p, &a->cfg, l->argc > 0 ? l->argv : nullptr, l->cwd[0] != '\0' ? l->cwd : nullptr);
-    if (rc == TE_OK && plat_watch_fd(a->plat, p->pty.master_fd, &p->tag) != TE_OK) {
+    if (rc == TE_OK && watch_pty(a, p) != TE_OK) {
         p->tag = -1;
         rc = TE_ERR_PLATFORM;
     }
@@ -859,8 +878,8 @@ static void send_break(app *a)
         return;
     }
     te_sess_type t = p->sess != nullptr ? p->sess->s.type : TE_SESS_LOCAL;
-    if ((t == TE_SESS_SERIAL || t == TE_SESS_TELNET) && p->pty.child > 0) {
-        (void)kill(p->pty.child, SIGUSR1);   /* the helper turns this into a Break */
+    if (t == TE_SESS_SERIAL || t == TE_SESS_TELNET) {
+        pty_send_break(&p->pty);
         show_toast(a, "Break sent");
     } else if (t == TE_SESS_SSH) {
         show_toast(a, "SSH: press Enter, then type ~B to send a Break");
@@ -875,7 +894,11 @@ static void send_break(app *a)
 static void host_files_dialog(void *user, te_dialog_kind kind, int request)
 {
     app *a = user;
-    const char *def = kind == TE_DIALOG_CHOOSE_FOLDER ? a->download_dir : getenv("HOME");
+    static char home[1024];   /* outlives the dialog, which may read it later */
+    const char *def = a->download_dir;
+    if (kind != TE_DIALOG_CHOOSE_FOLDER) {
+        def = os_home_dir(home, sizeof home) == TE_OK ? home : nullptr;
+    }
     plat_file_dialog(a->plat, kind, def, request);
 }
 
@@ -1010,7 +1033,7 @@ static void update_files(app *a)
 static void apply_files_config(app *a)
 {
     char dir[1024] = { 0 };
-    if (launch_expand_home(a->cfg.download_dir, dir, sizeof dir) != TE_OK || dir[0] != '/') {
+    if (launch_expand_home(a->cfg.download_dir, dir, sizeof dir) != TE_OK || !os_path_is_absolute(dir)) {
         (void)launch_expand_home("~/Downloads", dir, sizeof dir);
     }
     (void)str_copy(a->download_dir, sizeof a->download_dir, dir);
@@ -2322,22 +2345,29 @@ static void run(app *a)
 
 int main(int argc, char **argv)
 {
-    /* Helper modes: the built-in Telnet and serial clients run inside a pane. */
+#ifndef _WIN32
+    /* Helper modes: the built-in Telnet and serial clients run inside a pane
+     * (on Windows they are feterm-helper.exe, a console program). */
     if (argc >= 2 && strcmp(argv[1], "--telnet-helper") == 0) {
         return telnet_helper_main(argc - 2, argv + 2);
     }
     if (argc >= 2 && strcmp(argv[1], "--serial-helper") == 0) {
         return serial_helper_main(argc - 2, argv + 2);
     }
+#endif
     static app a;   /* large (sidebar state); zero-initialised */
-    a.watch.fd = -1;
+#ifndef _WIN32
+    a.watch.fd = -1;   /* the Windows watch is all nullptrs when unused */
+#endif
     a.watch_tag = -1;
     int rc = parse_cli(argc, argv, &a.cli);
     if (rc != 0) {
         return rc > 0 ? EXIT_SUCCESS : EXIT_FAILURE;
     }
     te_log_set_level(a.cli.verbose ? TE_LOG_DEBUG : TE_LOG_INFO);
+#ifdef SIGPIPE
     (void)signal(SIGPIPE, SIG_IGN);
+#endif
 
     config_defaults(&a.cfg);
     if (config_load(&a.cfg, a.cli.config_path) != TE_OK && a.cli.config_path != nullptr) {
@@ -2428,8 +2458,15 @@ int main(int argc, char **argv)
     if (url_create(&a.urls) != TE_OK) {
         LOG_W("link detection unavailable");
     }
+#ifdef _WIN32
+    te_err wrc = watch_init(&a.watch, a.cli.config_path) == TE_OK
+                     ? plat_watch_handle(a.plat, watch_handle(&a.watch), &a.watch_tag)
+                     : TE_ERR_NOTFOUND;
+    if (wrc != TE_OK && wrc != TE_ERR_NOTFOUND) {
+#else
     if (watch_init(&a.watch, a.cli.config_path) == TE_OK &&
         plat_watch_fd(a.plat, a.watch.fd, &a.watch_tag) != TE_OK) {
+#endif
         a.watch_tag = -1;
         watch_destroy(&a.watch);
     }

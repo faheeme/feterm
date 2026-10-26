@@ -94,6 +94,10 @@ void plat_primary_set(te_platform *p, const char *utf8);
  * is sent once, then again only after plat_fd_rearm(tag).
  */
 [[nodiscard]] te_err plat_watch_fd(te_platform *p, int fd, int *tag);
+#ifdef _WIN32
+/* Windows: watch a waitable HANDLE instead (an event that is set while data is ready). */
+[[nodiscard]] te_err plat_watch_handle(te_platform *p, void *handle, int *tag);
+#endif
 void plat_fd_rearm(te_platform *p, int tag);
 /* Stop watching (call before closing the fd). The tag may be reused later. */
 void plat_unwatch_fd(te_platform *p, int tag);

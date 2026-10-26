@@ -17,7 +17,7 @@
 
 /* snprintf wrapper: TE_ERR_TRUNC on truncation, TE_ERR_INVAL on encoding error. */
 [[nodiscard]] te_err str_fmt(char *dst, size_t dstsz, const char *fmt, ...)
-    __attribute__((format(printf, 3, 4)));
+    TE_PRINTF(3, 4);
 
 /* Heap duplicate (nullptr on failure). Caller frees. */
 [[nodiscard]] char *str_dup(const char *s);

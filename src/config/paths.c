@@ -4,29 +4,25 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "util/os.h"
 #include "util/str.h"
 
 te_err paths_config_dir(char *out, size_t outsz)
 {
-    const char *xdg = getenv("XDG_CONFIG_HOME");
-    if (xdg != nullptr && xdg[0] == '/') {
-        return str_fmt(out, outsz, "%s/%s", xdg, APP_NAME);
+    char base[TE_PATH_MAX] = { 0 };
+    te_err rc = os_config_base(base, sizeof base);
+    if (rc != TE_OK) {
+        return rc;
     }
-    const char *home = getenv("HOME");
-    if (home == nullptr || home[0] != '/') {
-        return TE_ERR_NOTFOUND;
-    }
-    return str_fmt(out, outsz, "%s/.config/%s", home, APP_NAME);
+    return str_fmt(out, outsz, "%s/%s", base, APP_NAME);
 }
 
 static te_err exe_dir(char *out, size_t outsz)
 {
     char buf[TE_PATH_MAX] = { 0 };
-    ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
-    if (n <= 0 || (size_t)n >= sizeof buf) {
+    if (os_self_exe(buf, sizeof buf) != TE_OK) {
         return TE_ERR_SYS;
     }
-    buf[n] = '\0';
     char *slash = strrchr(buf, '/');
     if (slash == nullptr) {
         return TE_ERR_NOTFOUND;

@@ -39,7 +39,8 @@ typedef struct te_launch {
 
 /* $XDG_RUNTIME_DIR/<app> (or /tmp/<app>-<uid>), created 0700 and checked to be ours. */
 [[nodiscard]] te_err launch_control_dir(char *out, size_t outsz);
-/* Absolute path of the running executable. */
+/* The program that runs --telnet-helper and --serial-helper: this executable, or on
+ * Windows the console program feterm-helper.exe next to it. */
 [[nodiscard]] te_err launch_self_exe(char *out, size_t outsz);
 /* Expand a leading "~/" with $HOME. */
 [[nodiscard]] te_err launch_expand_home(const char *in, char *out, size_t outsz);

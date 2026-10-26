@@ -1,16 +1,14 @@
 /* SDL3 backend: one code path for Wayland and X11 (SDL picks at runtime). */
 #include "platform/platform.h"
 
+#ifndef _WIN32
 #include <dlfcn.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <stdatomic.h>
+#endif
 #include <string.h>
-#include <unistd.h>
 
 #include <SDL3/SDL.h>
 
+#include "platform/fdwatch.h"
 #include "platform/icon_data.h"
 #include "util/log.h"
 #include "util/mem.h"
@@ -29,13 +27,7 @@ struct te_platform {
     uint32_t       wake_event;     /* registered SDL user event type */
     uint32_t       dialog_event;   /* file dialog answers */
 
-    /* fd watcher thread: polls every armed fd plus a wake pipe */
-    SDL_Thread    *thread;
-    atomic_int     fds[TE_PLAT_MAX_FDS];     /* -1: slot free */
-    atomic_bool    armed[TE_PLAT_MAX_FDS];
-    atomic_int     nfds;
-    int            wake_pipe[2];
-    atomic_bool    quit;
+    te_fdwatch    *watch;          /* fds (POSIX) or HANDLEs (Windows) */
 };
 
 /* Copies one embedded icon image into a new surface. Returns nullptr on failure. */
@@ -149,62 +141,6 @@ static te_key map_key(SDL_Keycode k, uint32_t *cp)
     return TE_KEY_NONE;
 }
 
-static void wake_thread(te_platform *p)
-{
-    if (p->wake_pipe[1] >= 0) {
-        ssize_t w = write(p->wake_pipe[1], "w", 1);
-        (void)w;   /* the pipe is non-blocking; a full pipe already means "wake up" */
-    }
-}
-
-static int SDLCALL fd_thread(void *arg)
-{
-    te_platform *p = arg;
-    while (!atomic_load(&p->quit)) {
-        struct pollfd pfd[TE_PLAT_MAX_FDS + 1];
-        int tags[TE_PLAT_MAX_FDS + 1] = { 0 };
-        nfds_t n = 0;
-        pfd[n] = (struct pollfd){ .fd = p->wake_pipe[0], .events = POLLIN, .revents = 0 };
-        tags[n++] = -1;
-        int count = atomic_load(&p->nfds);
-        for (int i = 0; i < count && i < TE_PLAT_MAX_FDS; i++) {
-            if (atomic_load(&p->armed[i]) && atomic_load(&p->fds[i]) >= 0) {
-                pfd[n] = (struct pollfd){ .fd = atomic_load(&p->fds[i]), .events = POLLIN, .revents = 0 };
-                tags[n++] = i;
-            }
-        }
-        int r = poll(pfd, n, -1);
-        if (r < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            break;
-        }
-        for (nfds_t k = 0; k < n; k++) {
-            if (pfd[k].revents == 0) {
-                continue;
-            }
-            if (tags[k] < 0) {
-                char drain[64];
-                while (read(p->wake_pipe[0], drain, sizeof drain) > 0) {
-                }
-                continue;
-            }
-            /* Disarm until the main thread has drained this fd and re-armed it. */
-            atomic_store(&p->armed[tags[k]], false);
-            SDL_Event ev;
-            SDL_zero(ev);
-            ev.type = p->wake_event;
-            ev.user.code = tags[k];
-            if (!SDL_PushEvent(&ev)) {
-                LOG_W("SDL_PushEvent failed: %s", SDL_GetError());
-                atomic_store(&p->armed[tags[k]], true);
-            }
-        }
-    }
-    return 0;
-}
-
 /* Creates the window and its GL context, with or without an alpha channel. */
 static bool create_surface(te_platform *p, const te_platform_opts *o, bool alpha)
 {
@@ -230,6 +166,7 @@ static bool create_surface(te_platform *p, const te_platform_opts *o, bool alpha
     return true;
 }
 
+#ifndef _WIN32
 typedef unsigned long (*x_intern_atom_fn)(void *dpy, const char *name, int only_if_exists);
 typedef unsigned long (*x_get_selection_owner_fn)(void *dpy, unsigned long atom);
 
@@ -283,6 +220,7 @@ static bool x11_compositor_running(SDL_Window *win)
     lib = nullptr;
     return running;
 }
+#endif
 
 bool plat_transparency_available(te_platform *p)
 {
@@ -296,9 +234,15 @@ bool plat_transparency_available(te_platform *p)
     if (strcmp(drv, "wayland") == 0) {
         return true;   /* every Wayland compositor blends alpha surfaces */
     }
+#ifdef _WIN32
+    if (strcmp(drv, "windows") == 0) {
+        return true;   /* DWM always composites */
+    }
+#else
     if (strcmp(drv, "x11") == 0) {
         return x11_compositor_running(p->win);
     }
+#endif
     return false;
 }
 
@@ -312,16 +256,12 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
     if (p == nullptr) {
         return TE_ERR_NOMEM;
     }
-    p->wake_pipe[0] = -1;
-    p->wake_pipe[1] = -1;
-    atomic_init(&p->quit, false);
-    atomic_init(&p->nfds, 0);
-    for (size_t i = 0; i < TE_PLAT_MAX_FDS; i++) {
-        atomic_init(&p->fds[i], -1);
-        atomic_init(&p->armed[i], false);
-    }
-
     (void)SDL_SetAppMetadata(APP_DISPLAY_NAME, APP_VERSION, o->app_id != nullptr ? o->app_id : APP_ID);
+#ifdef _WIN32
+    /* OpenGL ES through ANGLE (Direct3D 11), shipped next to the exe as libEGL.dll and
+     * libGLESv2.dll: it works on every GPU, and in VMs through the WARP software renderer. */
+    (void)SDL_SetHint(SDL_HINT_OPENGL_ES_DRIVER, "1");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         LOG_E("SDL_Init: %s", SDL_GetError());
         TE_FREE(p);
@@ -360,6 +300,12 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
         plat_destroy(&p);
         return TE_ERR_PLATFORM;
     }
+    te_err rc = fdwatch_create(&p->watch, p->wake_event);
+    if (rc != TE_OK) {
+        LOG_E("cannot start the fd watcher: %s", te_strerror(rc));
+        plat_destroy(&p);
+        return rc;
+    }
     p->ibeam = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
     p->hand = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
     p->arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_DEFAULT);
@@ -380,18 +326,7 @@ void plat_destroy(te_platform **pp)
         return;
     }
     te_platform *p = *pp;
-    if (p->thread != nullptr) {
-        atomic_store(&p->quit, true);
-        wake_thread(p);
-        SDL_WaitThread(p->thread, nullptr);
-        p->thread = nullptr;
-    }
-    for (size_t i = 0; i < 2; i++) {
-        if (p->wake_pipe[i] >= 0) {
-            close(p->wake_pipe[i]);
-            p->wake_pipe[i] = -1;
-        }
-    }
+    fdwatch_destroy(&p->watch);
     SDL_Cursor **cursors[] = { &p->ibeam, &p->hand, &p->arrow };
     for (size_t i = 0; i < TE_ARRAY_LEN(cursors); i++) {
         if (*cursors[i] != nullptr) {
@@ -413,6 +348,12 @@ void plat_destroy(te_platform **pp)
 
 void plat_show(te_platform *p)
 {
+#ifdef _WIN32
+    /* Windows would cascade new windows from the top-left; start in the middle of the
+     * screen instead (here, once the final size is set). Linux window managers place
+     * windows themselves. */
+    (void)SDL_SetWindowPosition(p->win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+#endif
     (void)SDL_ShowWindow(p->win);
 }
 
@@ -731,62 +672,35 @@ char *plat_primary_get(te_platform *p)
 
 te_err plat_watch_fd(te_platform *p, int fd, int *tag)
 {
-    if (p == nullptr || fd < 0 || tag == nullptr) {
-        return TE_ERR_INVAL;
-    }
-    int count = atomic_load(&p->nfds);
-    int n = -1;
-    for (int i = 0; i < count; i++) {
-        if (atomic_load(&p->fds[i]) < 0) {
-            n = i;   /* reuse a freed slot */
-            break;
-        }
-    }
-    if (n < 0) {
-        if (count >= TE_PLAT_MAX_FDS) {
-            return TE_ERR_RANGE;
-        }
-        n = count;
-    }
-    if (p->wake_pipe[0] < 0 && pipe2(p->wake_pipe, O_CLOEXEC | O_NONBLOCK) != 0) {
-        return TE_ERR_SYS;
-    }
-    atomic_store(&p->fds[n], fd);
-    atomic_store(&p->armed[n], true);
-    if (n == count) {
-        atomic_store(&p->nfds, n + 1);
-    }
-    *tag = n;
-    if (p->thread == nullptr) {
-        p->thread = SDL_CreateThread(fd_thread, "fd-watch", p);
-        if (p->thread == nullptr) {
-            LOG_E("SDL_CreateThread: %s", SDL_GetError());
-            atomic_store(&p->fds[n], -1);
-            return TE_ERR_PLATFORM;
-        }
-    } else {
-        wake_thread(p);
-    }
-    return TE_OK;
+#ifdef _WIN32
+    (void)p;
+    (void)fd;
+    (void)tag;
+    return TE_ERR_PLATFORM;   /* Windows pipes are not waitable: use plat_watch_handle */
+#else
+    return p != nullptr ? fdwatch_add(p->watch, fd, tag) : TE_ERR_INVAL;
+#endif
 }
+
+#ifdef _WIN32
+te_err plat_watch_handle(te_platform *p, void *handle, int *tag)
+{
+    return p != nullptr ? fdwatch_add(p->watch, handle, tag) : TE_ERR_INVAL;
+}
+#endif
 
 void plat_fd_rearm(te_platform *p, int tag)
 {
-    if (p == nullptr || tag < 0 || tag >= atomic_load(&p->nfds)) {
-        return;
+    if (p != nullptr) {
+        fdwatch_rearm(p->watch, tag);
     }
-    atomic_store(&p->armed[tag], true);
-    wake_thread(p);
 }
 
 void plat_unwatch_fd(te_platform *p, int tag)
 {
-    if (p == nullptr || tag < 0 || tag >= atomic_load(&p->nfds)) {
-        return;
+    if (p != nullptr) {
+        fdwatch_remove(p->watch, tag);
     }
-    atomic_store(&p->armed[tag], false);
-    atomic_store(&p->fds[tag], -1);
-    wake_thread(p);
 }
 
 void plat_set_pointer(te_platform *p, te_pointer kind)

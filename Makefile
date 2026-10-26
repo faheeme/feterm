@@ -35,18 +35,49 @@ HARDEN  := -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection
            $(CFPROT) -fPIE -fno-strict-overflow -fno-delete-null-pointer-checks
 OPT     ?= -O2 -g
 
-CPPFLAGS += -D_GNU_SOURCE -I$(GEN) -Isrc
-CFLAGS   += -std=c23 $(WARN) $(HARDEN) $(OPT) $(shell $(PKG_CONFIG) --cflags $(PKGS))
-LDFLAGS  += -pie -Wl,-z,relro,-z,now,-z,noexecstack,--as-needed
-LDLIBS   += $(shell $(PKG_CONFIG) --libs $(PKGS)) -lm
+# Windows (MinGW-w64, usually cross-compiled: make CC=x86_64-w64-mingw32-gcc).
+# Files ending in _win.c replace the POSIX-only ones listed here.
+WINDOWS    := $(if $(findstring mingw,$(TARGET)),1)
+POSIX_ONLY := src/pty/pty.c src/config/watch.c src/util/spawn.c src/util/os_posix.c src/remote/proc.c \
+              src/platform/fdwatch_posix.c src/sessions/helper_io.c src/sessions/serial.c \
+              src/sessions/serial_baud.c src/sessions/telnet_helper.c
+WIN_ONLY   := $(wildcard src/*/*_win.c)
+# feterm-helper.exe on Windows: the Telnet and serial clients as a console program.
+HELPER_SRC := src/sessions/helper_main_win.c src/sessions/helper_con_win.c src/sessions/telnet_helper_win.c \
+              src/sessions/serial_win.c
 
-SRC := $(wildcard src/*.c src/*/*.c)
+CPPFLAGS += -D_GNU_SOURCE -I$(GEN) -Isrc
+ifdef WINDOWS
+EXE      := .exe
+PKGS     := sdl3 libpcre2-8 freetype2 fontconfig
+HARDEN   := -D_FORTIFY_SOURCE=3 -fstack-protector-strong $(CFPROT)
+CPPFLAGS += -include src/util/compat_win.h -D__USE_MINGW_ANSI_STDIO=1 -DGL_GLEXT_PROTOTYPES
+LDFLAGS  += -mwindows -Wl,--dynamicbase,--high-entropy-va,--nxcompat
+OS_LIBS  := -lGLESv2 -lssp -lws2_32 -lshell32 -lole32 -luuid
+OS_SRC   := $(filter-out $(POSIX_ONLY) $(HELPER_SRC),$(wildcard src/*.c src/*/*.c))
+HELPER   := $(NAME)-helper.exe
+# Binary mode for every fopen(): no CRLF translation anywhere.
+BINMODE  := $(shell $(CC) -print-file-name=binmode.o)
+# Icon, manifest (UTF-8 code page, DPI awareness) and version information.
+WINDRES  ?= $(CC:gcc=windres)
+ifeq ($(origin AR),default)
+AR       := $(CC:gcc=ar)
+endif
+RES      := $(BUILD)/$(NAME)_res.o
+else
+LDFLAGS  += -pie -Wl,-z,relro,-z,now,-z,noexecstack,--as-needed
+OS_SRC   := $(filter-out $(WIN_ONLY),$(wildcard src/*.c src/*/*.c))
+endif
+CFLAGS   += -std=c23 $(WARN) $(HARDEN) $(OPT) $(shell $(PKG_CONFIG) --cflags $(PKGS))
+LDLIBS   += $(shell $(PKG_CONFIG) --libs $(PKGS)) $(OS_LIBS) -lm
+
+SRC := $(OS_SRC)
 OBJ := $(SRC:%.c=$(BUILD)/%.o)
 DEP := $(OBJ:.o=.d)
 
 .PHONY: all clean debug analyze install uninstall test
 
-all: $(NAME) $(BUILD)/$(APP_ID).desktop $(BUILD)/$(NAME).1
+all: $(NAME)$(EXE) $(HELPER) $(BUILD)/$(APP_ID).desktop $(BUILD)/$(NAME).1
 
 $(GEN)/app_name.h: src/app_name.h.in Makefile
 	@mkdir -p $(@D)
@@ -70,22 +101,42 @@ $(BUILD)/%.o: %.c $(GEN)/app_name.h
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(NAME): $(OBJ)
-	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@ $(LDLIBS)
+comma := ,
+$(BUILD)/$(NAME)_res.o: data/windows/feterm.rc data/windows/feterm.manifest data/windows/feterm.ico $(GEN)/app_name.h
+	@mkdir -p $(@D)
+	$(WINDRES) -I$(GEN) -Idata/windows -DAPP_VERSION_NUM=$(subst .,$(comma),$(VERSION)),0 $< -O coff -o $@
+
+$(NAME)$(EXE): $(OBJ) $(RES)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(BINMODE) $^ -o $@ $(LDLIBS)
+
+# The helper links only what it uses: the app's objects go in as a library.
+$(BUILD)/libapp.a: $(filter-out $(BUILD)/src/main.o,$(OBJ))
+	rm -f $@
+	$(AR) rcs $@ $^
+
+$(NAME)-helper.exe: $(HELPER_SRC:%.c=$(BUILD)/%.o) $(BUILD)/libapp.a $(RES)
+	$(CC) $(CFLAGS) $(filter-out -mwindows,$(LDFLAGS)) -mconsole $(BINMODE) $^ -o $@ -lws2_32 -lssp -lm
 
 # Headless unit tests for the core, built with ASan + UBSan.
-TEST_SRC := $(wildcard src/util/*.c src/config/*.c src/vt/*.c src/highlight/*.c src/ui/*.c src/sessions/*.c src/remote/*.c) \
+TEST_SRC := $(filter-out $(if $(WINDOWS),$(POSIX_ONLY) $(HELPER_SRC),$(WIN_ONLY)),$(wildcard src/util/*.c src/config/*.c src/vt/*.c \
+                src/highlight/*.c src/ui/*.c src/sessions/*.c src/remote/*.c)) \
             src/input/keys.c src/input/click.c src/input/mouse.c src/input/keybind.c \
             src/app/layout.c src/app/banner.c src/render/boxdraw.c tests/test_core.c
-TEST_SAN := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+# MinGW has no sanitizers; a Windows build cross-compiled on Linux runs its tests under Wine.
+ifdef WINDOWS
+TEST_SAN ?=
+TEST_RUN ?= $(if $(filter Windows_NT,$(OS)),,WINEDEBUG=-all wine)
+else
+TEST_SAN ?= -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+endif
 
-$(BUILD)/test_core: $(TEST_SRC) $(wildcard tests/*.inc) $(GEN)/app_name.h
+$(BUILD)/test_core$(EXE): $(TEST_SRC) $(wildcard tests/*.inc) $(GEN)/app_name.h
 	@mkdir -p $(@D)
 	$(CC) $(CPPFLAGS) -std=c23 $(WARN) -Wno-missing-prototypes -O1 -g $(TEST_SAN) \
 	    $(shell $(PKG_CONFIG) --cflags libpcre2-8) $(TEST_SRC) -o $@ $(shell $(PKG_CONFIG) --libs libpcre2-8) -lm
 
-test: $(BUILD)/test_core
-	./$(BUILD)/test_core
+test: $(BUILD)/test_core$(EXE)
+	$(TEST_RUN) ./$(BUILD)/test_core$(EXE)
 
 # AddressSanitizer + UndefinedBehaviorSanitizer build.
 debug:
@@ -128,6 +179,6 @@ uninstall:
 	$(if $(DESTDIR),,-gtk-update-icon-cache -qtf $(ICONDIR))
 
 clean:
-	rm -rf build build-debug build-analyze $(NAME)
+	rm -rf build build-debug build-analyze $(NAME) $(NAME).exe $(NAME)-helper.exe
 
 -include $(DEP)

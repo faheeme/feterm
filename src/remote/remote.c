@@ -7,7 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#ifndef _WIN32
 #include <sys/inotify.h>
+#endif
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>

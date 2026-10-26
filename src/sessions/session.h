@@ -88,7 +88,15 @@ uint16_t session_default_port(te_sess_type t);
 [[nodiscard]] bool session_user_valid(const char *user);
 /* A value safe to store and pass as one argv element: printable, no leading '-'. */
 [[nodiscard]] bool session_value_safe(const char *v);
-/* Serial device: an absolute path under /dev/ without "..". */
+
+/* What a serial device name looks like here, for hints and examples. */
+#ifdef _WIN32
+#define TE_SERIAL_EXAMPLE "COM3"
+#else
+#define TE_SERIAL_EXAMPLE "/dev/ttyUSB0"
+#endif
+
+/* Serial device: an absolute path under /dev/ without ".." (POSIX); COM1 to COM256 (Windows). */
 [[nodiscard]] bool session_device_valid(const char *dev);
 
 /* Checks every field for the session's type; on failure *why says which. */

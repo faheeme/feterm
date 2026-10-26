@@ -555,7 +555,7 @@ static void open_session_form(te_sidebar *sb, int purpose, const te_session *s, 
     }
     fl = form_add(f, FD_SHARE, TE_FIELD_CHECK, "Share login", nullptr);
     if (fl != nullptr) fl->checked = s->share_conn;
-    fl = form_add(f, FD_DEVICE, TE_FIELD_TEXT, "Device", s->serial.device[0] != '\0' ? s->serial.device : "/dev/ttyUSB0");
+    fl = form_add(f, FD_DEVICE, TE_FIELD_TEXT, "Device", s->serial.device[0] != '\0' ? s->serial.device : TE_SERIAL_EXAMPLE);
     bool custom = false;
     size_t bc = baud_choice_of(s->serial.baud, &custom);
     form_set_choices(form_add(f, FD_BAUD, TE_FIELD_CHOICE, "Baud rate", nullptr), baud_choices, nbaud_choices, bc);
@@ -856,7 +856,7 @@ void sidebar_quick_connect(te_sidebar *sb)
     te_form_field *fl = form_add(&sb->form, FD_TARGET, TE_FIELD_TEXT, "Connect to", "");
     if (fl != nullptr) {
         fl->maxlen = 300;
-        (void)str_copy(fl->placeholder, sizeof fl->placeholder, "user@host:port  or  /dev/ttyUSB0,115200");
+        (void)str_copy(fl->placeholder, sizeof fl->placeholder, "user@host:port  or  " TE_SERIAL_EXAMPLE ",115200");
     }
     fl = form_add(&sb->form, FD_SAVE, TE_FIELD_CHECK, "Save session", nullptr);
     if (fl != nullptr) fl->checked = false;
@@ -1088,7 +1088,7 @@ static void submit_form(te_sidebar *sb)
         size_t t = TE_MIN(form_choice(f, FD_TYPE), TE_ARRAY_LEN(map) - 1);
         te_session s = { 0 };
         if (!quick_parse(map[t], form_value(f, FD_TARGET), &s)) {
-            form_set_error(f, map[t] == TE_SESS_SERIAL ? "Use a device like /dev/ttyUSB0, optionally ,115200,8N1,none"
+            form_set_error(f, map[t] == TE_SESS_SERIAL ? "Use a device like " TE_SERIAL_EXAMPLE ", optionally ,115200,8N1,none"
                                                        : "Use host, host:port or user@host:port");
             return;
         }

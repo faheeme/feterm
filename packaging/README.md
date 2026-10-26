@@ -5,8 +5,9 @@
 | `arch/` | Arch, Omarchy, Manjaro | AUR |
 | `rpm/` | Fedora, Rocky / Alma / RHEL 10 | COPR |
 | `debian/` | Ubuntu 26.04 and newer | Launchpad PPA |
+| `windows/` | Windows 10 (1809) and 11, x64 | GitLab release files, winget |
 
-All three download the tag's source archive from GitLab:
+The Linux packages all download the tag's source archive from GitLab:
 `https://gitlab.com/faheeme/feterm/-/archive/vX.Y.Z/feterm-vX.Y.Z.tar.gz`, which unpacks to
 `feterm-vX.Y.Z/`. The project must be public for this to work.
 
@@ -38,6 +39,10 @@ a user's build.
    `packaging/debian/changelog` in the tag, or the script stops and says so. Each Ubuntu
    series gets its own upload, `X.Y.Z-1~ppa1~26.04.1` and `~26.10.1`, built against its own
    libraries, so nothing has to be copied between series on Launchpad.
+
+5. **Windows:** `packaging/windows/build.sh`, then attach `dist/feterm-X.Y.Z-windows-x64.zip`,
+   `dist/feterm-X.Y.Z-windows-x64-setup.exe` and `dist/SHA256SUMS` to the GitLab release and
+   update winget (see *Windows* below).
 
 A fix to the packaging alone (no code change) keeps the version and bumps the package
 release instead: `pkgrel=2`, `Release: 2`, or `-1~ppa2`.
@@ -97,3 +102,65 @@ the spec's `Version:` doesn't match `VERSION` in the Makefile. To set it up once
 
 For aarch64, add the `-aarch64` chroots too. The Makefile picks the control-flow protection
 flag for the CPU: `-fcf-protection` on x86, `-mbranch-protection=standard` on ARM64.
+
+## Windows
+
+`packaging/windows/build.sh` cross-compiles on Linux in Docker (MinGW-w64; the image comes
+from `windows/Dockerfile` and is built on the first run), runs the unit tests under Wine,
+and writes to `dist/`:
+
+| File | What it is |
+|---|---|
+| `feterm-X.Y.Z-windows-x64.zip` | portable: unzip anywhere and run `feterm.exe` |
+| `feterm-X.Y.Z-windows-x64-setup.exe` | installer: per user without admin rights, or for all users |
+| `SHA256SUMS` | checksums of both |
+
+Both hold `feterm.exe`, `feterm-helper.exe` (the Telnet and serial clients, a console
+program), the DLLs they need (found by `windows/stage.sh` from their imports, including
+ANGLE's `libEGL.dll`/`libGLESv2.dll`, which draw through Direct3D 11), fontconfig's
+`etc\fonts` and FeTerm's `data\`. Settings and sessions live in `%APPDATA%\feterm`; neither
+the installer nor its uninstaller touches them.
+
+The installer (`windows/feterm.iss`, Inno Setup) adds a Start-menu entry and, if ticked, a
+desktop shortcut and "Open FeTerm here" on folders. Never change its `AppId`: Windows and
+winget recognise installed versions by it.
+
+### Attaching the files to a release
+
+After `glab release create` (step 1):
+
+```sh
+glab release upload vX.Y.Z dist/feterm-X.Y.Z-windows-x64.zip \
+    dist/feterm-X.Y.Z-windows-x64-setup.exe dist/SHA256SUMS
+```
+
+### winget
+
+winget's catalogue is the GitHub repository `microsoft/winget-pkgs`, so this needs a GitHub
+account. Copy the installer's download link from the GitLab release, then:
+
+```sh
+packaging/windows/winget.sh https://gitlab.com/.../feterm-X.Y.Z-windows-x64-setup.exe
+```
+
+It downloads the file, checks it matches `dist/`, and writes the three manifests to
+`dist/winget/manifests/f/FaheemEssack/FeTerm/X.Y.Z/`. On Windows, check them and open the
+pull request with Microsoft's tools:
+
+```powershell
+winget validate --manifest <that folder>
+winget install --manifest <that folder>      # needs: winget settings --enable LocalManifestFiles
+wingetcreate submit <that folder>            # forks winget-pkgs and opens the pull request
+```
+
+Microsoft's bots test the installer; the package appears in `winget search feterm` once a
+moderator merges it, usually within a few days. Later versions go the same way.
+
+### Unsigned builds
+
+The programs are not code-signed. Microsoft Defender may flag a new build as
+`Wacatac.B!ml` or similar (a machine-learning guess) and SmartScreen warns about the
+installer until enough people have run it. Report a false positive at
+<https://www.microsoft.com/en-us/wdsi/filesubmission>. Signing (e.g. Azure Trusted Signing)
+removes both.
+

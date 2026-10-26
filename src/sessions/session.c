@@ -212,6 +212,14 @@ bool session_value_safe(const char *v)
 
 bool session_device_valid(const char *dev)
 {
+#ifdef _WIN32
+    /* COM1 to COM256 (any case); \\.\ is added when the port is opened. */
+    if (dev == nullptr || _strnicmp(dev, "COM", 3) != 0 || dev[3] < '1' || dev[3] > '9') {
+        return false;
+    }
+    long n = 0;
+    return str_to_long(dev + 3, 1, 256, &n);
+#else
     if (dev == nullptr || strncmp(dev, "/dev/", 5) != 0 || dev[5] == '\0') {
         return false;
     }
@@ -226,6 +234,7 @@ bool session_device_valid(const char *dev)
         }
     }
     return true;
+#endif
 }
 
 static bool jump_valid(const char *j)
@@ -299,7 +308,11 @@ bool session_validate(const te_session *s, const char **why)
         return true;
     case TE_SESS_SERIAL:
         if (!session_device_valid(s->serial.device)) {
-            *w = "Device must be a path under /dev/, e.g. /dev/ttyUSB0";
+#ifdef _WIN32
+            *w = "Device must be a COM port, e.g. " TE_SERIAL_EXAMPLE;
+#else
+            *w = "Device must be a path under /dev/, e.g. " TE_SERIAL_EXAMPLE;
+#endif
             return false;
         }
         if (s->serial.baud < 50 || s->serial.baud > 16000000) {

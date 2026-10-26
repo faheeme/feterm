@@ -257,6 +257,9 @@ te_err pane_cwd(const te_pane *p, char *out, size_t outsz)
     if (osc7 != nullptr && osc7[0] == '/') {
         return str_copy(out, outsz, osc7);
     }
+#ifdef _WIN32
+    return TE_ERR_NOTFOUND;   /* no /proc: only what the shell reports (OSC 7) */
+#else
     if (p->pty.child <= 0) {
         return TE_ERR_NOTFOUND;
     }
@@ -271,4 +274,5 @@ te_err pane_cwd(const te_pane *p, char *out, size_t outsz)
     }
     buf[n] = '\0';
     return str_copy(out, outsz, buf);
+#endif
 }

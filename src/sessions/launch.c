@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "util/os.h"
 #include "util/str.h"
 
 /* Copy s into the launch's storage and append it to argv. */
@@ -37,9 +38,10 @@ static te_err arg_num(te_launch *l, const char *prefix, int v)
 te_err launch_expand_home(const char *in, char *out, size_t outsz)
 {
     if (strncmp(in, "~/", 2) == 0 || strcmp(in, "~") == 0) {
-        const char *home = getenv("HOME");
-        if (home == nullptr || home[0] != '/') {
-            return TE_ERR_NOTFOUND;
+        char home[4096] = { 0 };
+        te_err rc = os_home_dir(home, sizeof home);
+        if (rc != TE_OK) {
+            return rc;
         }
         return str_fmt(out, outsz, "%s%s", home, in + 1);
     }
@@ -110,7 +112,7 @@ te_err launch_build(const te_session *s, const te_session_eff *eff, const te_lau
     case TE_SESS_SSH:
         return build_ssh(s, eff, o, out);
     case TE_SESS_TELNET:
-        if (o->self_exe == nullptr || o->self_exe[0] != '/') {
+        if (o->self_exe == nullptr || !os_path_is_absolute(o->self_exe)) {
             return TE_ERR_NOTFOUND;
         }
         (void)str_fmt(num, sizeof num, "%u", (unsigned)(s->port != 0 ? s->port : 23));
@@ -121,7 +123,7 @@ te_err launch_build(const te_session *s, const te_session_eff *eff, const te_lau
         if (rc == TE_OK) rc = arg_num(out, "", o->keepalive > 0 ? o->keepalive : 30);
         return rc;
     case TE_SESS_SERIAL: {
-        if (o->self_exe == nullptr || o->self_exe[0] != '/') {
+        if (o->self_exe == nullptr || !os_path_is_absolute(o->self_exe)) {
             return TE_ERR_NOTFOUND;
         }
         char line[64] = { 0 };
@@ -137,8 +139,15 @@ te_err launch_build(const te_session *s, const te_session_eff *eff, const te_lau
             rc = launch_expand_home(s->directory, out->cwd, sizeof out->cwd);
         }
         if (rc == TE_OK && s->command[0] != '\0') {
+#ifdef _WIN32
+            const char *comspec = getenv("ComSpec");
+            rc = arg(out, comspec != nullptr && comspec[0] != '\0' ? comspec : "cmd.exe");
+            if (rc == TE_OK) rc = arg(out, "/d");   /* no AutoRun commands */
+            if (rc == TE_OK) rc = arg(out, "/c");
+#else
             rc = arg(out, "/bin/sh");
             if (rc == TE_OK) rc = arg(out, "-c");
+#endif
             if (rc == TE_OK) rc = arg(out, s->command);
         }
         return rc;
@@ -150,6 +159,12 @@ te_err launch_build(const te_session *s, const te_session_eff *eff, const te_lau
 
 te_err launch_control_dir(char *out, size_t outsz)
 {
+#ifdef _WIN32
+    /* Windows' OpenSSH has no connection sharing (ControlMaster). */
+    (void)out;
+    (void)outsz;
+    return TE_ERR_NOTFOUND;
+#else
     const char *rt = getenv("XDG_RUNTIME_DIR");
     te_err rc = rt != nullptr && rt[0] == '/' ? str_fmt(out, outsz, "%s/%s", rt, APP_NAME)
                                               : str_fmt(out, outsz, "/tmp/%s-%ld", APP_NAME, (long)getuid());
@@ -168,21 +183,25 @@ te_err launch_control_dir(char *out, size_t outsz)
         return TE_ERR_PERM;   /* someone else's directory, or a symlink: never use it */
     }
     return TE_OK;
+#endif
 }
 
 te_err launch_self_exe(char *out, size_t outsz)
 {
-    if (outsz < 2) {
-        return TE_ERR_INVAL;
+#ifdef _WIN32
+    /* The helpers are a console program next to feterm.exe. */
+    char exe[4096] = { 0 };
+    te_err rc = os_self_exe(exe, sizeof exe);
+    if (rc != TE_OK) {
+        return rc;
     }
-    ssize_t n = readlink("/proc/self/exe", out, outsz - 1);
-    if (n <= 0 || (size_t)n >= outsz - 1) {
+    char *slash = strrchr(exe, '/');
+    if (slash == nullptr) {
         return TE_ERR_NOTFOUND;
     }
-    out[n] = '\0';
-    /* A rebuilt or upgraded binary shows up as "... (deleted)"; it can still be run via /proc. */
-    if (out[0] != '/' || strstr(out, " (deleted)") != nullptr) {
-        return str_copy(out, outsz, "/proc/self/exe");
-    }
-    return TE_OK;
+    *slash = '\0';
+    return str_fmt(out, outsz, "%s/%s-helper.exe", exe, APP_NAME);
+#else
+    return os_self_exe(out, outsz);
+#endif
 }

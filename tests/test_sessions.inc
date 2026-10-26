@@ -73,10 +73,17 @@ static void test_session_validation(void)
     CHECK(!session_user_valid("a@b"));
     CHECK(!session_user_valid("a b"));
 
+#ifdef _WIN32
+    CHECK(session_device_valid("COM3") && session_device_valid("com12") && session_device_valid("COM256"));
+    CHECK(!session_device_valid("COM0") && !session_device_valid("COM257") && !session_device_valid("COM03"));
+    CHECK(!session_device_valid("COM3 ") && !session_device_valid("COM") && !session_device_valid("LPT1"));
+    CHECK(!session_device_valid("\\\\.\\COM3") && !session_device_valid("/dev/ttyUSB0"));
+#else
     CHECK(session_device_valid("/dev/ttyUSB0"));
     CHECK(!session_device_valid("/dev/../etc/shadow"));
     CHECK(!session_device_valid("/tmp/x"));
     CHECK(!session_device_valid("/dev/"));
+#endif
 
     te_serial_cfg c = { .baud = 9600, .data_bits = 8, .stop_bits = 1 };
     CHECK(serial_parse("115200,8N1,none", &c) && c.baud == 115200 && c.data_bits == 8 && c.parity == TE_PARITY_NONE &&
@@ -103,7 +110,8 @@ static void test_session_validation(void)
 
 static void test_session_store(void)
 {
-    char root[] = "/tmp/te-store-XXXXXX";
+    char root[512];
+    (void)tmp_template(root, sizeof root, "te-store");
     if (mkdtemp(root) == nullptr) {
         CHECK(false);
         return;
@@ -131,7 +139,7 @@ static void test_session_store(void)
     te_session ser;
     session_defaults(&ser, TE_SESS_SERIAL);
     (void)str_copy(ser.name, sizeof ser.name, "console");
-    (void)str_copy(ser.serial.device, sizeof ser.serial.device, "/dev/ttyUSB0");
+    (void)str_copy(ser.serial.device, sizeof ser.serial.device, TE_SERIAL_EXAMPLE);
     ser.serial.baud = 115200;
     CHECK(store_save_session(&st, &ser, nullptr, nullptr) == TE_OK);
 
@@ -184,6 +192,7 @@ static void test_session_store(void)
         CHECK(store_find_session(&st, "Lab", "core-sw2") >= 0 && store_find_session(&st, "Lab", "core-sw1") < 0);
     }
 
+#ifndef _WIN32
     /* A planted symlink is never listed or followed. */
     char link[300] = { 0 };
     CHECK(str_fmt(link, sizeof link, "%s/evil", sroot) == TE_OK);
@@ -195,6 +204,7 @@ static void test_session_store(void)
     (void)str_copy(ev.name, sizeof ev.name, "escape");
     CHECK(store_save_session(&st, &ev, nullptr, nullptr) != TE_OK);
     CHECK(access("/tmp/escape.ini", F_OK) != 0);
+#endif
 
     /* Deleting a folder with someone else's file in it is refused, and nothing is removed. */
     char foreign[300] = { 0 };
@@ -229,12 +239,21 @@ static void test_launch_argv(void)
     s.port = 2222;
     te_session_eff eff = { .color = TE_TAG_NONE, .anti_idle = 0 };
     (void)str_copy(eff.user, sizeof eff.user, "admin");
+#ifdef _WIN32
+    te_launch_opts o = { .self_exe = "C:/Program Files/FeTerm/feterm.exe", .control_dir = nullptr, .keepalive = 30 };
+#else
     te_launch_opts o = { .self_exe = "/usr/bin/feterm", .control_dir = "/run/user/1000/feterm", .keepalive = 30 };
+#endif
     te_launch l;
     CHECK(launch_build(&s, &eff, &o, &l) == TE_OK);
     CHECK(l.argc > 4 && strcmp(l.argv[0], "ssh") == 0 && l.argv[l.argc] == nullptr);
+#ifdef _WIN32
+    /* No connection sharing with Windows' OpenSSH. */
+    CHECK(argv_has(&l, "ServerAliveInterval=30") && !argv_has(&l, "ControlMaster=auto") && argv_has(&l, "admin"));
+#else
     CHECK(argv_has(&l, "ServerAliveInterval=30") && argv_has(&l, "ControlMaster=auto"));
     CHECK(argv_has(&l, "ControlPath=/run/user/1000/feterm/cm-%C") && argv_has(&l, "admin"));
+#endif
     CHECK(l.argc >= 2 && strcmp(l.argv[l.argc - 2], "--") == 0 && strcmp(l.argv[l.argc - 1], "10.1.1.1") == 0);
     s.share_conn = false;
     CHECK(launch_build(&s, &eff, &o, &l) == TE_OK && !argv_has(&l, "ControlMaster=auto"));
@@ -252,7 +271,7 @@ static void test_launch_argv(void)
     te_session c;
     session_defaults(&c, TE_SESS_SERIAL);
     (void)str_copy(c.name, sizeof c.name, "con");
-    (void)str_copy(c.serial.device, sizeof c.serial.device, "/dev/ttyUSB0");
+    (void)str_copy(c.serial.device, sizeof c.serial.device, TE_SERIAL_EXAMPLE);
     c.serial.baud = 115200;
     CHECK(launch_build(&c, &eff, &o, &l) == TE_OK && l.argc == 4 && strcmp(l.argv[1], "--serial-helper") == 0 &&
           strcmp(l.argv[3], "115200,8N1,none") == 0);
@@ -262,8 +281,13 @@ static void test_launch_argv(void)
     (void)str_copy(loc.name, sizeof loc.name, "logs");
     CHECK(launch_build(&loc, &eff, &o, &l) == TE_OK && l.argc == 0);   /* login shell */
     (void)str_copy(loc.command, sizeof loc.command, "htop -d 10");
+#ifdef _WIN32
+    CHECK(launch_build(&loc, &eff, &o, &l) == TE_OK && l.argc == 4 && strcmp(l.argv[2], "/c") == 0 &&
+          strcmp(l.argv[3], "htop -d 10") == 0);
+#else
     CHECK(launch_build(&loc, &eff, &o, &l) == TE_OK && l.argc == 3 && strcmp(l.argv[0], "/bin/sh") == 0 &&
           strcmp(l.argv[2], "htop -d 10") == 0);
+#endif
 }
 
 static void test_telnet_protocol(void)
@@ -403,8 +427,13 @@ static void test_ui_widgets(void)
     CHECK(quick_parse(TE_SESS_SSH, "[fe80::1]:22", &q) && strcmp(q.host, "fe80::1") == 0 && q.port == 22);
     CHECK(quick_parse(TE_SESS_SSH, "fe80::1", &q) && strcmp(q.host, "fe80::1") == 0 && q.port == 0);
     CHECK(quick_parse(TE_SESS_TELNET, "ts1 2003", &q) && strcmp(q.host, "ts1") == 0 && q.port == 2003);
+#ifdef _WIN32
+    CHECK(quick_parse(TE_SESS_SERIAL, "COM3,115200,8N1,none", &q) && q.serial.baud == 115200 &&
+          strcmp(q.serial.device, "COM3") == 0 && strcmp(q.name, "COM3 115200") == 0);
+#else
     CHECK(quick_parse(TE_SESS_SERIAL, "/dev/ttyUSB0,115200,8N1,none", &q) && q.serial.baud == 115200 &&
           strcmp(q.serial.device, "/dev/ttyUSB0") == 0 && strcmp(q.name, "ttyUSB0 115200") == 0);
+#endif
     CHECK(session_validate(&q, nullptr));   /* every quick result must be launchable */
     CHECK(quick_parse(TE_SESS_SSH, "admin@10.0.0.1:2222", &q) && session_validate(&q, nullptr));
     CHECK(quick_parse(TE_SESS_TELNET, "ts1 2003", &q) && session_validate(&q, nullptr));
@@ -424,7 +453,8 @@ static void sb_connect(void *u, const te_session *s, const te_session_eff *e, bo
 
 static void test_sidebar_rules(void)
 {
-    char root[] = "/tmp/te-sb-XXXXXX";
+    char root[512];
+    (void)tmp_template(root, sizeof root, "te-sb");
     if (mkdtemp(root) == nullptr) {
         CHECK(false);
         return;

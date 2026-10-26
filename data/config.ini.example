@@ -1,10 +1,12 @@
-; Copy to ~/.config/<program-name>/config.ini (the directory follows the program name).
+; Copy to ~/.config/<program-name>/config.ini (Linux) or %APPDATA%\<program-name>\config.ini
+; (Windows); the directory follows the program name.
 ; Lines starting with ; or # are comments. Comments must be on their own line:
 ; values (including regular expressions) may contain ';' and '#'.
 
 [font]
-; Any Fontconfig name, e.g. "JetBrains Mono" or "Fira Code:style=Retina"
-family = monospace
+; Any Fontconfig name, e.g. "JetBrains Mono" or "Fira Code:style=Retina".
+; Default: monospace on Linux, "Cascadia Mono,Consolas" on Windows.
+;family = monospace
 ; Points, 4..96. Ctrl+Shift+= / Ctrl+Shift+- / Ctrl+Shift+0 zoom at runtime.
 size = 11
 ; 0.8..2.0

@@ -322,6 +322,13 @@ bool pty_reap(te_pty *p, int *status)
     return false;
 }
 
+void pty_send_break(te_pty *p)
+{
+    if (p != nullptr && p->child > 0) {
+        (void)kill(p->child, SIGUSR1);   /* the helper turns this into a Break */
+    }
+}
+
 void pty_destroy(te_pty *p)
 {
     if (p == nullptr) {

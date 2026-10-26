@@ -10,7 +10,12 @@
 void config_defaults(te_config *c)
 {
     memset(c, 0, sizeof *c);
+#ifdef _WIN32
+    /* fontconfig's generic "monospace" means Courier New on Windows. */
+    (void)str_copy(c->font_family, sizeof c->font_family, "Cascadia Mono,Consolas");
+#else
     (void)str_copy(c->font_family, sizeof c->font_family, "monospace");
+#endif
     c->font_size = 11.0f;
     c->line_height = 1.0f;
     c->cols = 100;

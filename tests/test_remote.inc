@@ -176,7 +176,8 @@ static void test_remote_helpers(void)
     CHECK(remote_join("/var/log/", "x", j, sizeof j) == TE_OK && strcmp(j, "/var/log/x") == 0);
     CHECK(remote_join("", "x", j, sizeof j) == TE_OK && strcmp(j, "x") == 0);
 
-    char dir[] = "/tmp/te-uniq-XXXXXX";
+    char dir[512];
+    (void)tmp_template(dir, sizeof dir, "te-uniq");
     if (mkdtemp(dir) != nullptr) {
         int fd = open(dir, O_RDONLY | O_DIRECTORY);
         char p[300] = { 0 };

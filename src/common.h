@@ -29,6 +29,13 @@ typedef enum te_err {
 
 [[nodiscard]] const char *te_strerror(te_err e);
 
+/* printf-style checking; MinGW's plain "printf" means the Microsoft dialect (no %zu). */
+#ifdef __MINGW32__
+#define TE_PRINTF(fmt, args) __attribute__((format(gnu_printf, fmt, args)))
+#else
+#define TE_PRINTF(fmt, args) __attribute__((format(printf, fmt, args)))
+#endif
+
 #define TE_ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 #define TE_MIN(a, b) ((a) < (b) ? (a) : (b))
 #define TE_MAX(a, b) ((a) > (b) ? (a) : (b))

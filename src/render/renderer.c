@@ -158,7 +158,7 @@ static const char *const glyph_vs =
     "layout(location=4) in vec4 a_flags;\n"
     "uniform vec2 u_vp;\n"
     "uniform vec2 u_atlas_size;\n"
-    "out vec2 v_uv;\n"
+    "out highp vec2 v_uv;\n"
     "out vec4 v_color;\n"
     "flat out float v_is_color;\n"
     "void main() {\n"
@@ -173,7 +173,8 @@ static const char *const glyph_fs =
     "#version 300 es\n"
     "precision mediump float;\n"
     "uniform sampler2D u_atlas;\n"
-    "in vec2 v_uv;\n"
+    /* highp: in 16-bit floats (ANGLE on some GPUs) atlas coordinates land on the wrong row. */
+    "in highp vec2 v_uv;\n"
     "in vec4 v_color;\n"
     "flat in float v_is_color;\n"
     "out vec4 o;\n"
@@ -589,8 +590,9 @@ static void push_glyph(inst_vec *v, const glyph *g, float x, float y, uint32_t r
     if (gi == nullptr) {
         return;
     }
-    gi->x = x;
-    gi->y = y;
+    /* Whole pixels: the atlas texels map 1:1 onto the screen, never half a texel off. */
+    gi->x = floorf(x + 0.5f);
+    gi->y = floorf(y + 0.5f);
     gi->w = (float)g->w;
     gi->h = (float)g->h;
     gi->u = (float)g->x;
