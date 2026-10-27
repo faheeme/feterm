@@ -12,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>

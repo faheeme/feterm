@@ -1,0 +1,110 @@
+# macOS builds. The project lives on GitLab (gitlab.com/faheeme/feterm); GitLab
+# push-mirrors it to GitHub only so these jobs can run on GitHub's free macOS
+# runners. Never push to the GitHub copy directly.
+name: macOS
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14        # Apple Silicon; bundle runs on macOS 14 and newer
+            arch: arm64
+          - runner: macos-15-intel  # Intel; bundle runs on macOS 15 and newer
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Dependencies
+        run: |
+          brew install llvm sdl3 pcre2 freetype fontconfig pkgconf dylibbundler
+          # Apple's clang lags upstream; C23 (<stdckdint.h>, nullptr) and libFuzzer need Homebrew's.
+          echo "CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
+          echo "FUZZ_CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          "$CC" --version | head -1
+          make -j"$(sysctl -n hw.ncpu)"
+
+      - name: Unit tests (ASan + UBSan)
+        run: make test
+
+      - name: Fuzz the parsers (20 s each)
+        run: make fuzz FUZZ_TIME=20
+
+      - name: Terminal end to end (pty, shell, exit)
+        run: |
+          out="$RUNNER_TEMP/pty-ok"
+          rm -f "$out"
+          # perl's alarm stands in for timeout(1), which macOS lacks.
+          perl -e 'alarm 60; exec @ARGV' ./feterm -e /bin/sh -c "tty > '$out'; stty size >> '$out'; locale charmap >> '$out'" || true
+          cat "$out"
+          grep -q '^/dev/ttys' "$out"
+
+      - name: Render snapshot
+        run: |
+          make build/render_snapshot
+          perl -e 'alarm 60; exec @ARGV' ./build/render_snapshot "$RUNNER_TEMP/snapshot.ppm"
+          sips -s format png "$RUNNER_TEMP/snapshot.ppm" --out "snapshot-${{ matrix.arch }}.png"
+
+      - name: App bundle and disk image
+        run: |
+          make dmg
+          dmg=$(ls build/*.dmg)
+          echo "DMG=$dmg" >> "$GITHUB_ENV"
+          hdiutil verify "$dmg"
+          # The bundle must not need Homebrew: list every library it loads.
+          app=$(ls -d build/*.app)
+          otool -L "$app"/Contents/MacOS/* "$app"/Contents/Frameworks/*.dylib | grep -v ':$' | sort -u
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: feterm-macos-${{ matrix.arch }}
+          path: |
+            build/*.dmg
+            snapshot-*.png
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: feterm-macos-*
+          merge-multiple: true
+      - name: GitHub release with the disk images
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+             --title "FeTerm ${GITHUB_REF_NAME#v} (macOS)" \
+             --notes "macOS builds of ${GITHUB_REF_NAME}. Source, notes and other platforms: https://gitlab.com/faheeme/feterm/-/releases/${GITHUB_REF_NAME}" \
+             ./*.dmg

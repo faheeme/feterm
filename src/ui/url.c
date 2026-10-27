@@ -248,6 +248,53 @@ bool url_is_openable(const char *uri)
     return false;
 }
 
+#ifdef __APPLE__
+static int hexval(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/*
+ * macOS "open file:///x.app" (or .command, .terminal...) would run it, so a
+ * file link is shown in Finder instead: open -R only ever reveals. path is the
+ * percent-encoded part after "file://", which url_is_openable() made start
+ * with '/'.
+ */
+static te_err reveal_file(const char *path)
+{
+    char out[TE_MAX_URI + 1] = { 0 };
+    size_t o = 0;
+    for (size_t i = 0; path[i] != '\0'; i++) {
+        char c = path[i];
+        if (c == '%') {
+            int h1 = path[i + 1] != '\0' ? hexval(path[i + 1]) : -1;
+            int h2 = h1 >= 0 && path[i + 2] != '\0' ? hexval(path[i + 2]) : -1;
+            if (h1 < 0 || h2 < 0) {
+                return TE_ERR_INVAL;
+            }
+            c = (char)((h1 << 4) | h2);
+            i += 2;
+        }
+        if ((unsigned char)c < 0x20 || (unsigned char)c == 0x7F) {
+            return TE_ERR_INVAL;   /* control bytes (and %00) never belong in a path */
+        }
+        if (o + 1 >= sizeof out) {
+            return TE_ERR_INVAL;
+        }
+        out[o++] = c;
+    }
+    out[o] = '\0';
+    if (out[0] != '/') {
+        return TE_ERR_INVAL;
+    }
+    const char *argv[] = { "open", "-R", out, nullptr };
+    return spawn_detached(argv);
+}
+#endif
+
 te_err url_open(const char *uri)
 {
     if (!url_is_openable(uri)) {
@@ -260,6 +307,13 @@ te_err url_open(const char *uri)
     if (rc != TE_OK) {
         return rc;
     }
+#ifdef __APPLE__
+    if (strncasecmp(full, "file://", 7) == 0) {
+        return reveal_file(full + 7);
+    }
+    const char *argv[] = { "open", full, nullptr };
+#else
     const char *argv[] = { "xdg-open", full, nullptr };
+#endif
     return spawn_detached(argv);
 }

@@ -1,12 +1,17 @@
 #include "sessions/helper_io.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef __APPLE__
+#include <sys/event.h>
+#else
 #include <sys/signalfd.h>
+#endif
 #include <termios.h>
 #include <unistd.h>
 
@@ -64,6 +69,45 @@ void helper_raw_stdin(void)
     }
 }
 
+#ifdef __APPLE__
+/* macOS has no signalfd: a kqueue's EVFILT_SIGNAL records the signals instead, and
+ * the kqueue descriptor polls readable while any are pending. EVFILT_SIGNAL sees a
+ * signal even when it is ignored, so ignoring them stops SIGUSR1 killing us. */
+int helper_signals(void)
+{
+    static const int sigs[] = { SIGWINCH, SIGUSR1 };
+    int kq = kqueue();
+    if (kq < 0) {
+        return -1;
+    }
+    int fl = fcntl(kq, F_GETFD);
+    if (fl < 0 || fcntl(kq, F_SETFD, fl | FD_CLOEXEC) != 0) {
+        (void)close(kq);
+        return -1;
+    }
+    for (size_t i = 0; i < TE_ARRAY_LEN(sigs); i++) {
+        struct kevent kev;
+        memset(&kev, 0, sizeof kev);
+        EV_SET(&kev, (uintptr_t)sigs[i], EVFILT_SIGNAL, EV_ADD, 0, 0, nullptr);
+        if (signal(sigs[i], SIG_IGN) == SIG_ERR || kevent(kq, &kev, 1, nullptr, 0, nullptr) != 0) {
+            (void)close(kq);
+            return -1;
+        }
+    }
+    return kq;
+}
+
+int helper_take_signal(int sigfd)
+{
+    struct kevent ev;
+    memset(&ev, 0, sizeof ev);
+    const struct timespec zero = { 0, 0 };
+    if (kevent(sigfd, nullptr, 0, &ev, 1, &zero) != 1 || ev.filter != EVFILT_SIGNAL || ev.ident > 64u) {
+        return 0;
+    }
+    return (int)ev.ident;
+}
+#else
 int helper_signals(void)
 {
     sigset_t set;
@@ -86,3 +130,4 @@ int helper_take_signal(int sigfd)
     }
     return (int)si.ssi_signo;
 }
+#endif

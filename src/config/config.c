@@ -13,6 +13,9 @@ void config_defaults(te_config *c)
 #ifdef _WIN32
     /* fontconfig's generic "monospace" means Courier New on Windows. */
     (void)str_copy(c->font_family, sizeof c->font_family, "Cascadia Mono,Consolas");
+#elif defined(__APPLE__)
+    /* Menlo ships with every macOS; fontconfig's "monospace" points at fonts it lacks. */
+    (void)str_copy(c->font_family, sizeof c->font_family, "Menlo,Monaco");
 #else
     (void)str_copy(c->font_family, sizeof c->font_family, "monospace");
 #endif

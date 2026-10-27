@@ -36,8 +36,9 @@ void os_harden_process(void);
 /*
  * Tag a file that just arrived from a remote host with the Mark-of-the-Web, so
  * the OS treats it as untrusted (SmartScreen/zone warnings). Writes a
- * Zone.Identifier stream on Windows; a no-op on POSIX. Best-effort: failure is
- * ignored, since it only adds a warning and never blocks the download.
+ * Zone.Identifier stream on Windows and the com.apple.quarantine attribute on
+ * macOS; a no-op on Linux. Best-effort: failure is ignored, since it only adds
+ * a warning and never blocks the download.
  */
 void os_mark_from_internet(const char *path);
 

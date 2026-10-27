@@ -269,9 +269,17 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
     }
     LOG_D("video driver: %s", SDL_GetCurrentVideoDriver());
 
+#ifdef __APPLE__
+    /* No OpenGL ES on macOS: the native 4.1 core profile (see render/gl.h). */
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#else
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
     (void)SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
     /* Always ask for an alpha channel, so transparency can be switched on by a

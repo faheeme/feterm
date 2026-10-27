@@ -12,9 +12,10 @@ void helper_say(const char *msg);
 void helper_sayf(const char *fmt, ...) TE_PRINTF(1, 2);
 /* Put the pty (stdin) in raw mode: every key goes straight through, no local echo. */
 void helper_raw_stdin(void);
-/* Block SIGWINCH (window resized) and SIGUSR1 (send Break), and return a signalfd for them (-1 on error). */
+/* Block SIGWINCH (window resized) and SIGUSR1 (send Break), and return a pollable descriptor for them:
+ * a signalfd on Linux, a kqueue on macOS (-1 on error). */
 [[nodiscard]] int helper_signals(void);
-/* Read one signal from the signalfd; returns its number, or 0. */
+/* Read one signal from that descriptor; returns its number, or 0. */
 int helper_take_signal(int sigfd);
 
 #endif

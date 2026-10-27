@@ -3,9 +3,8 @@
 #include <math.h>
 #include <string.h>
 
-#include <GLES3/gl3.h>
-
 #include "render/boxdraw.h"
+#include "render/gl.h"
 #include "util/log.h"
 #include "util/mem.h"
 #include "util/str.h"
@@ -130,7 +129,7 @@ static void *vec_push(inst_vec *v)
 /* Shaders */
 
 static const char *const rect_vs =
-    "#version 300 es\n"
+    TE_GLSL_VERSION
     "layout(location=0) in vec2 a_corner;\n"
     "layout(location=1) in vec4 a_rect;\n"
     "layout(location=2) in vec4 a_color;\n"
@@ -143,14 +142,14 @@ static const char *const rect_vs =
     "}\n";
 
 static const char *const rect_fs =
-    "#version 300 es\n"
+    TE_GLSL_VERSION
     "precision mediump float;\n"
     "in vec4 v_color;\n"
     "out vec4 o;\n"
     "void main() { o = v_color; }\n";
 
 static const char *const glyph_vs =
-    "#version 300 es\n"
+    TE_GLSL_VERSION
     "layout(location=0) in vec2 a_corner;\n"
     "layout(location=1) in vec4 a_rect;\n"
     "layout(location=2) in vec4 a_uv;\n"
@@ -170,7 +169,7 @@ static const char *const glyph_vs =
     "}\n";
 
 static const char *const glyph_fs =
-    "#version 300 es\n"
+    TE_GLSL_VERSION
     "precision mediump float;\n"
     "uniform sampler2D u_atlas;\n"
     /* highp: in 16-bit floats (ANGLE on some GPUs) atlas coordinates land on the wrong row. */
@@ -494,7 +493,11 @@ te_err renderer_create(te_renderer **out, te_font *font)
         goto fail;
     }
     glBindTexture(GL_TEXTURE_2D, r->atlas);
+#ifdef __APPLE__
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, r->atlas_size, r->atlas_size, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+#else
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, r->atlas_size, r->atlas_size);
+#endif
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

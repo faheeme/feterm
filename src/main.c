@@ -11,6 +11,9 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifdef __APPLE__
+#include <unistd.h>
+#endif
 
 #include "app/banner.h"
 #include "app/layout.h"
@@ -955,6 +958,9 @@ static bool path_is_executable_type(const char *path)
         "js",  "jse", "vbs", "vbe", "wsf", "wsh", "ps1", "psm1", "lnk", "url", "reg",
         "inf", "scf", "msc", "sct", "desktop", "application", "appref-ms", "gadget",
         "dll", "so",  "dylib", "run",
+        /* macOS: bundles, scripts and installers that open runs instead of editing */
+        "app", "command", "tool", "terminal", "pkg", "mpkg", "workflow", "action", "scpt", "scptd",
+        "applescript", "fileloc", "webloc", "inetloc", "prefpane", "kext", "plugin", "bundle", "osax",
     };
     for (size_t i = 0; i < TE_ARRAY_LEN(ext); i++) {
         if (strcasecmp(dot + 1, ext[i]) == 0) {
@@ -985,7 +991,12 @@ static void host_r_edit_open(void *user, const char *path)
         return;
     }
     if (n == 0) {
+#ifdef __APPLE__
+        argv[n++] = "open";
+        argv[n++] = "-t";   /* always the default text editor: never launches the file */
+#else
         argv[n++] = "xdg-open";
+#endif
     }
     argv[n++] = path;
     argv[n] = nullptr;
@@ -2392,6 +2403,29 @@ static void run(app *a)
     }
 }
 
+#ifdef __APPLE__
+/*
+ * Started from Finder or the Dock, an app gets "/" as its directory and no
+ * locale. Shells then open in "/" and treat UTF-8 as bytes, so do what
+ * Terminal.app does: start in the home folder and default to UTF-8.
+ */
+static void macos_launch_env(void)
+{
+    char cwd[16] = { 0 };
+    const char *home = getenv("HOME");
+    if (getcwd(cwd, sizeof cwd) != nullptr && strcmp(cwd, "/") == 0 && home != nullptr && home[0] == '/') {
+        (void)chdir(home);
+    }
+    const char *lc_all = getenv("LC_ALL");
+    const char *lc_ctype = getenv("LC_CTYPE");
+    const char *lang = getenv("LANG");
+    if ((lc_all == nullptr || lc_all[0] == '\0') && (lc_ctype == nullptr || lc_ctype[0] == '\0') &&
+        (lang == nullptr || lang[0] == '\0')) {
+        (void)setenv("LANG", "en_US.UTF-8", 0);
+    }
+}
+#endif
+
 int main(int argc, char **argv)
 {
     os_harden_process();   /* drop the current dir from the DLL/exe search order (Windows) */
@@ -2404,6 +2438,9 @@ int main(int argc, char **argv)
     if (argc >= 2 && strcmp(argv[1], "--serial-helper") == 0) {
         return serial_helper_main(argc - 2, argv + 2);
     }
+#endif
+#ifdef __APPLE__
+    macos_launch_env();
 #endif
     static app a;   /* large (sidebar state); zero-initialised */
 #ifndef _WIN32

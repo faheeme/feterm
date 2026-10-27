@@ -8,8 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <GLES3/gl3.h>
-
 #include "config/theme.h"
 #include "app/layout.h"
 #include "highlight/highlight.h"
@@ -18,6 +16,7 @@
 #include "ui/url.h"
 #include "platform/platform.h"
 #include "render/font.h"
+#include "render/gl.h"
 #include "render/renderer.h"
 #include "util/log.h"
 #include "util/mem.h"
@@ -167,7 +166,7 @@ static bool phase4(const char *out_path, const te_theme *th)
     char *kcmd = nullptr;
     te_layout l;
     layout_init(&l, 2);
-    te_platform_opts po = { .title = "snapshot", .width = 1200, .height = 640, .transparent = false };
+    te_platform_opts po = { .title = "snapshot", .width = 1200, .height = 640 };
     if (plat_create(&plat, &po) != TE_OK) goto out;
     if (font_create(&font, "monospace", 15.0f, 1.1f) != TE_OK) goto out;
     if (renderer_create(&ren, font) != TE_OK) goto out;
@@ -313,8 +312,7 @@ int main(int argc, char **argv)
         rc = phase4(argv[1], &th) ? EXIT_SUCCESS : EXIT_FAILURE;
         return rc;
     }
-    te_platform_opts po = { .title = "snapshot", .width = 1000, .height = text == demo ? 400 : 560,
-                            .transparent = false };
+    te_platform_opts po = { .title = "snapshot", .width = 1000, .height = text == demo ? 400 : 560 };
     if (plat_create(&plat, &po) != TE_OK) goto out;
     if (font_create(&font, "monospace", 15.0f, 1.1f) != TE_OK) goto out;
     if (renderer_create(&ren, font) != TE_OK) goto out;

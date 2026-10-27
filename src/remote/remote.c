@@ -7,7 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#ifndef _WIN32
+#ifdef __APPLE__
+#include <sys/event.h>
+#elif !defined(_WIN32)
 #include <sys/inotify.h>
 #endif
 #include <sys/stat.h>
@@ -48,9 +50,12 @@ typedef struct req {
 } req;
 
 typedef struct edit_watch {
-    int      wd;
-#ifdef _WIN32
+    int      wd;           /* inotify watch; macOS: the private folder's descriptor */
+#if defined(_WIN32) || defined(__APPLE__)
     uint64_t stamp, size;  /* last write time and size last seen */
+#endif
+#ifdef __APPLE__
+    int      ffd;          /* the copy's own descriptor, for in-place writes; -1 if none */
 #endif
     char    *local;
     char    *remote;
@@ -126,7 +131,7 @@ struct te_remote {
 #ifdef _WIN32
     HANDLE          edit_note;       /* change notification on edit_dir, or nullptr */
 #else
-    int             ino_fd;
+    int             ino_fd;          /* inotify; a kqueue on macOS */
 #endif
     int             tag_ino;
     edit_watch      edits[EDIT_MAX];
@@ -1647,8 +1652,32 @@ void remote_scp_download(te_remote *r, const char *remote_path, const char *loca
  * Change notification for the edited copies. Linux: inotify on each copy's
  * private folder, matched by name. Windows: one notification for the whole
  * editing folder (it does not say which file), after which each copy's write
- * time and size are compared with what was last seen.
+ * time and size are compared with what was last seen. macOS: a kqueue watching
+ * each private folder (editors that save by renaming a new file into place)
+ * and each copy (editors that write in place), then the same comparison.
  */
+#if defined(_WIN32) || defined(__APPLE__)
+static bool file_stamp(const char *path, uint64_t *stamp, uint64_t *size);
+
+/* Schedule an upload for every copy whose write time or size moved. */
+static void edits_check_stamps(te_remote *r)
+{
+    uint64_t now = now_ms();
+    for (size_t i = 0; i < r->nedits; i++) {
+        edit_watch *e = &r->edits[i];
+        uint64_t stamp = 0;
+        uint64_t size = 0;
+        if (file_stamp(e->local, &stamp, &size) && (stamp != e->stamp || size != e->size)) {
+            e->stamp = stamp;
+            e->size = size;
+            if (now >= e->ignore_until) {
+                e->due = now + EDIT_SETTLE_MS;   /* editors save in bursts */
+            }
+        }
+    }
+}
+#endif
+
 #ifdef _WIN32
 static bool file_stamp(const char *path, uint64_t *stamp, uint64_t *size)
 {
@@ -1698,19 +1727,7 @@ static void edit_notify_drain(te_remote *r)
         r->edit_note = nullptr;
         return;
     }
-    uint64_t now = now_ms();
-    for (size_t i = 0; i < r->nedits; i++) {
-        edit_watch *e = &r->edits[i];
-        uint64_t stamp = 0;
-        uint64_t size = 0;
-        if (file_stamp(e->local, &stamp, &size) && (stamp != e->stamp || size != e->size)) {
-            e->stamp = stamp;
-            e->size = size;
-            if (now >= e->ignore_until) {
-                e->due = now + EDIT_SETTLE_MS;   /* editors save in bursts */
-            }
-        }
-    }
+    edits_check_stamps(r);
     if (r->tag_ino >= 0 && r->host.rearm != nullptr) {
         r->host.rearm(r->host.user, r->tag_ino);
     }
@@ -1722,6 +1739,120 @@ static void edit_notify_close(te_remote *r)
     if (r->edit_note != nullptr) {
         (void)FindCloseChangeNotification(r->edit_note);
         r->edit_note = nullptr;
+    }
+}
+#elif defined(__APPLE__)
+#define EDIT_DIR_NOTES  (NOTE_WRITE | NOTE_DELETE | NOTE_RENAME)
+#define EDIT_FILE_NOTES (NOTE_WRITE | NOTE_EXTEND | NOTE_ATTRIB | NOTE_DELETE | NOTE_RENAME)
+
+static bool file_stamp(const char *path, uint64_t *stamp, uint64_t *size)
+{
+    struct stat st;
+    memset(&st, 0, sizeof st);
+    if (stat(path, &st) != 0 || st.st_size < 0) {
+        return false;
+    }
+    /* Seconds and nanoseconds folded together; only equality matters. */
+    uint64_t sec = st.st_mtimespec.tv_sec > 0 ? (uint64_t)st.st_mtimespec.tv_sec : 0u;
+    uint64_t nsec = st.st_mtimespec.tv_nsec > 0 ? (uint64_t)st.st_mtimespec.tv_nsec : 0u;
+    *stamp = (sec << 30) ^ nsec ^ ((uint64_t)st.st_ino << 1);
+    *size = (uint64_t)st.st_size;
+    return true;
+}
+
+/* Watch fd on the kqueue; closes fd and returns -1 on failure. */
+static int edit_arm(te_remote *r, int fd, uint32_t notes)
+{
+    if (fd < 0) {
+        return -1;
+    }
+    struct kevent kev;
+    memset(&kev, 0, sizeof kev);
+    EV_SET(&kev, (uintptr_t)fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, notes, 0, nullptr);
+    if (kevent(r->ino_fd, &kev, 1, nullptr, 0, nullptr) != 0) {
+        (void)close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+static int edit_watch_file(te_remote *r, const char *local)
+{
+    return edit_arm(r, open(local, O_EVTONLY | O_CLOEXEC | O_NOFOLLOW), EDIT_FILE_NOTES);
+}
+
+static bool edit_notify_add(te_remote *r, const char *dir, int *wd)
+{
+    *wd = -1;
+    if (r->ino_fd < 0) {
+        r->ino_fd = kqueue();
+        if (r->ino_fd < 0) {
+            return false;
+        }
+        int fl = fcntl(r->ino_fd, F_GETFD);
+        if (fl < 0 || fcntl(r->ino_fd, F_SETFD, fl | FD_CLOEXEC) != 0 || !watch_obj(r, r->ino_fd, &r->tag_ino)) {
+            (void)close(r->ino_fd);
+            r->ino_fd = -1;
+            return false;
+        }
+    }
+    *wd = edit_arm(r, open(dir, O_EVTONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW), EDIT_DIR_NOTES);
+    return *wd >= 0;
+}
+
+static void edit_notify_drain(te_remote *r)
+{
+    struct kevent evs[16];
+    const struct timespec zero = { 0, 0 };
+    for (;;) {
+        int n = kevent(r->ino_fd, nullptr, 0, evs, (int)TE_ARRAY_LEN(evs), &zero);
+        if (n <= 0) {
+            break;
+        }
+        for (int k = 0; k < n; k++) {
+            if ((evs[k].fflags & (NOTE_DELETE | NOTE_RENAME)) == 0) {
+                continue;
+            }
+            for (size_t i = 0; i < r->nedits; i++) {
+                edit_watch *e = &r->edits[i];
+                if (e->ffd >= 0 && (uintptr_t)e->ffd == evs[k].ident) {
+                    (void)close(e->ffd);   /* replaced by the editor: watch the new file below */
+                    e->ffd = -1;
+                }
+            }
+        }
+        if ((size_t)n < TE_ARRAY_LEN(evs)) {
+            break;
+        }
+    }
+    for (size_t i = 0; i < r->nedits; i++) {
+        if (r->edits[i].ffd < 0) {
+            r->edits[i].ffd = edit_watch_file(r, r->edits[i].local);
+        }
+    }
+    edits_check_stamps(r);
+    if (r->tag_ino >= 0 && r->host.rearm != nullptr) {
+        r->host.rearm(r->host.user, r->tag_ino);
+    }
+}
+
+static void edit_notify_close(te_remote *r)
+{
+    unwatch(r, &r->tag_ino);
+    for (size_t i = 0; i < r->nedits; i++) {
+        edit_watch *e = &r->edits[i];
+        if (e->ffd >= 0) {
+            (void)close(e->ffd);
+        }
+        if (e->wd >= 0) {
+            (void)close(e->wd);
+        }
+        e->ffd = -1;
+        e->wd = -1;
+    }
+    if (r->ino_fd >= 0) {
+        (void)close(r->ino_fd);
+        r->ino_fd = -1;
     }
 }
 #else
@@ -1801,6 +1932,9 @@ static void add_edit_watch(te_remote *r, const char *local, const char *remote)
     edit_watch *e = &r->edits[r->nedits];
     memset(e, 0, sizeof *e);
     e->wd = wd;
+#ifdef __APPLE__
+    e->ffd = -1;
+#endif
     e->local = str_dup(local);
     e->remote = str_dup(remote);
     e->dir = str_dup(dir);
@@ -1808,10 +1942,17 @@ static void add_edit_watch(te_remote *r, const char *local, const char *remote)
         TE_FREE(e->local);
         TE_FREE(e->remote);
         TE_FREE(e->dir);
+#ifdef __APPLE__
+        (void)close(wd);   /* the folder's descriptor; nothing else refers to it */
+        e->wd = -1;
+#endif
         return;
     }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     (void)file_stamp(local, &e->stamp, &e->size);   /* the downloaded copy, as a baseline */
+#endif
+#ifdef __APPLE__
+    e->ffd = edit_watch_file(r, local);   /* -1 is survivable: the folder watch still sees replacements */
 #endif
     e->ignore_until = now_ms() + 1000u;
     r->nedits++;
