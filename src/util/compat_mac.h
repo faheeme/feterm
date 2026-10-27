@@ -5,8 +5,11 @@
  * Each wrapper keeps the Linux semantics the callers rely on: descriptors
  * come back close-on-exec, RENAME_NOREPLACE never replaces an existing name,
  * and secrets are wiped with a store the compiler may not remove. Where Linux
- * does something atomically (pipe2, SOCK_CLOEXEC) macOS needs a second call;
+ * does something atomically (pipe2) macOS needs a second call;
  * every such descriptor is also covered by the close_range() in the children.
+ *
+ * Nothing here may pull in headers that put common names (bind, connect...)
+ * into every file; sockets are handled where they are created.
  */
 #ifndef TE_COMPAT_MAC_H
 #define TE_COMPAT_MAC_H
@@ -22,14 +25,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 extern char **environ;
 
-/* Flag bits Linux accepts in socket()'s type; never real macOS SOCK_* values. */
-#define SOCK_NONBLOCK    0x10000000
-#define SOCK_CLOEXEC     0x20000000
 #define RENAME_NOREPLACE 1u
 
 static inline bool te_mac_set_fd_flags(int fd, bool cloexec, bool nonblock)
@@ -72,27 +71,6 @@ static inline int te_mac_pipe2(int fds[2], int flags)
     return 0;
 }
 #define pipe2(fds, flags) te_mac_pipe2((fds), (flags))
-
-static inline int te_mac_socket(int domain, int type, int protocol)
-{
-    bool cloexec = (type & SOCK_CLOEXEC) != 0;
-    bool nonblock = (type & SOCK_NONBLOCK) != 0;
-    int fd = socket(domain, type & ~(SOCK_CLOEXEC | SOCK_NONBLOCK), protocol);
-    if (fd < 0) {
-        return -1;
-    }
-    /* No SIGPIPE when the peer goes away: Linux callers expect EPIPE instead. */
-    int one = 1;
-    if (!te_mac_set_fd_flags(fd, cloexec, nonblock) ||
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, (socklen_t)sizeof one) != 0) {
-        int e = errno;
-        (void)close(fd);
-        errno = e;
-        return -1;
-    }
-    return fd;
-}
-#define socket(d, t, p) te_mac_socket((d), (t), (p))
 
 /* macOS posix_openpt() does not document O_CLOEXEC, so set it afterwards. */
 static inline int te_mac_posix_openpt(int flags)

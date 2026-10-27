@@ -47,7 +47,8 @@ jobs:
       - name: Build
         run: |
           "$CC" --version | head -1
-          make -j"$(sysctl -n hw.ncpu)"
+          # -k: report every file that fails, not just the first.
+          make -k -j"$(sysctl -n hw.ncpu)"
 
       - name: Unit tests (ASan + UBSan)
         run: make test
