@@ -151,6 +151,16 @@ static void leave(vt_parser *p)
     }
 }
 
+/* Abort the current string without dispatching it. CAN and SUB cancel the
+ * sequence in progress (unlike ESC/ST, which terminate and deliver it). */
+static void cancel(vt_parser *p)
+{
+    if (p->state == VT_OSC || p->state == VT_DCS_PASS || p->state == VT_APC ||
+        p->state == VT_DCS_IGNORE || p->state == VT_SOS_PM_APC) {
+        str_reset(p);
+    }
+}
+
 static void execute(vt_parser *p, uint8_t b)
 {
     if (p->cb->execute != nullptr) {
@@ -222,7 +232,7 @@ static void step(vt_parser *p, uint8_t b)
 
     /* "Anywhere" transitions. */
     if (b == 0x18 || b == 0x1A) {
-        leave(p);
+        cancel(p);
         execute(p, b);
         p->state = VT_GROUND;
         return;

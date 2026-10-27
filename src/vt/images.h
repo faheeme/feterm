@@ -13,6 +13,11 @@
 #define TE_MAX_IMAGES        128u
 #define TE_IMAGE_MAX_DIM     4096u
 #define TE_SIXEL_MAX_DIM     2048u
+/* Cap on cumulative horizontal fill (sum of repeat counts) across one sixel image.
+ * The repeat operator "!n" combined with "$" (carriage return) can otherwise force
+ * unbounded pixel writes from a tiny payload, freezing the render thread. 8x the
+ * full canvas allows heavy legitimate overdraw while bounding worst-case work. */
+#define TE_SIXEL_MAX_WORK    (8u * TE_SIXEL_MAX_DIM * TE_SIXEL_MAX_DIM)
 #define TE_IMAGE_BUDGET      (64u * 1024u * 1024u)    /* bytes of RGBA kept in total */
 #define TE_KITTY_MAX_PAYLOAD (48u * 1024u * 1024u)    /* base64 bytes across chunks */
 

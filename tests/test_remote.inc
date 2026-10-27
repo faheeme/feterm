@@ -161,6 +161,16 @@ static void test_remote_helpers(void)
     CHECK(!remote_local_name("\x01\x02", out, sizeof out));
     CHECK(remote_local_name("bad\x1b[31mname", out, sizeof out) && strchr(out, 0x1b) == nullptr);
     CHECK(remote_local_name("-rf", out, sizeof out) && out[0] == '_');
+    /* A right-to-left override (U+202E, UTF-8 E2 80 AE) disguises the real extension;
+     * it must be stripped, leaving the true name "invoicefdp.exe". */
+    CHECK(remote_local_name("invoice\xE2\x80\xAE" "fdp.exe", out, sizeof out) &&
+          strcmp(out, "invoicefdp.exe") == 0);
+    /* Zero-width space (U+200B) and BOM (U+FEFF) are dropped too. */
+    CHECK(remote_local_name("re\xE2\x80\x8B" "ad\xEF\xBB\xBF" "me.txt", out, sizeof out) &&
+          strcmp(out, "readme.txt") == 0);
+    /* A legitimate multi-byte name is preserved intact. */
+    CHECK(remote_local_name("r\xC3\xA9sum\xC3\xA9.txt", out, sizeof out) &&
+          strcmp(out, "r\xC3\xA9sum\xC3\xA9.txt") == 0);
 #ifdef _WIN32
     CHECK(remote_local_name("C:\\Users\\me\\test.bin", out, sizeof out) && strcmp(out, "C__Users_me_test.bin") == 0);
     CHECK(remote_local_name("a*b?c\"d<e>f|g", out, sizeof out) && strcmp(out, "a_b_c_d_e_f_g") == 0);

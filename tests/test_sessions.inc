@@ -68,10 +68,19 @@ static void test_session_validation(void)
     CHECK(!session_host_valid(""));
 
     CHECK(session_user_valid("admin"));
+    CHECK(session_user_valid("user.name-1_2"));
     CHECK(session_user_valid(""));
     CHECK(!session_user_valid("-l"));
     CHECK(!session_user_valid("a@b"));
     CHECK(!session_user_valid("a b"));
+    CHECK(!session_user_valid("a;id"));       /* shell metacharacters rejected */
+    CHECK(!session_user_valid("a|id"));
+    CHECK(!session_user_valid("a&id"));
+    CHECK(!session_user_valid("a`id`"));
+    CHECK(!session_user_valid("a$x"));
+    CHECK(!session_user_valid("a\\x"));
+    CHECK(!session_user_valid("a'x"));
+    CHECK(!session_user_valid("a\"x"));
 
 #ifdef _WIN32
     CHECK(session_device_valid("COM3") && session_device_valid("com12") && session_device_valid("COM256"));
@@ -225,6 +234,18 @@ static void test_session_store(void)
     struct stat sb = { 0 };
     CHECK(str_fmt(file, sizeof file, "%s/console.ini", sroot) == TE_OK);
     CHECK(stat(file, &sb) == 0 && (sb.st_mode & 0077) == 0);
+
+#ifndef _WIN32
+    /* A session file writable by group/others is untrusted (a "local" session runs
+     * a shell command), so it is refused on load, not silently honoured. */
+    CHECK(store_find_session(&st, "", "console") >= 0);
+    CHECK(chmod(file, 0666) == 0);
+    CHECK(store_reload(&st) == TE_OK);
+    CHECK(store_find_session(&st, "", "console") < 0);
+    CHECK(chmod(file, 0600) == 0);
+    CHECK(store_reload(&st) == TE_OK);
+    CHECK(store_find_session(&st, "", "console") >= 0);
+#endif
 
     store_close(&st);
     rm_tree(root);
@@ -441,6 +462,20 @@ static void test_ui_widgets(void)
     CHECK(!quick_parse(TE_SESS_SSH, "host:99999", &q));
     CHECK(!quick_parse(TE_SESS_SERIAL, "/etc/passwd", &q));
     CHECK(!quick_parse(TE_SESS_SSH, "", &q));
+
+    /* Jump hosts: every comma-separated hop is validated, not just the first. */
+    te_session jt;
+    session_defaults(&jt, TE_SESS_SSH);
+    (void)str_copy(jt.name, sizeof jt.name, "jumpy");
+    (void)str_copy(jt.host, sizeof jt.host, "10.0.0.1");
+    (void)str_copy(jt.jump, sizeof jt.jump, "bastion,hop2.example.net");
+    CHECK(session_validate(&jt, nullptr));
+    (void)str_copy(jt.jump, sizeof jt.jump, "bastion,-oProxyCommand=x");
+    CHECK(!session_validate(&jt, nullptr));   /* a hop starting with '-' is rejected */
+    (void)str_copy(jt.jump, sizeof jt.jump, "bastion,");
+    CHECK(!session_validate(&jt, nullptr));   /* empty trailing hop rejected */
+    (void)str_copy(jt.jump, sizeof jt.jump, "");
+    CHECK(session_validate(&jt, nullptr));    /* no jump host is fine */
 }
 
 /* Right-click only opens a menu; Delete only asks; nothing changes until confirmed. */

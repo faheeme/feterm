@@ -6,6 +6,7 @@
 
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/os.h"
 #include "util/str.h"
 #include "util/utf8.h"
 
@@ -1230,6 +1231,10 @@ static void full_reset(te_term *t)
         t->alt.lines[y].flags = 0;
         t->alt.lines[y].input_col = 0;
     }
+    for (uint16_t i = 1; i <= t->nlinks; i++) {
+        TE_FREE(t->links[i].uri);   /* RIS clears hyperlinks too, freeing the table */
+    }
+    t->nlinks = 0;
     t->view_offset = 0;
     t->title_depth = 0;
     t->last_cp = 0;
@@ -1499,6 +1504,24 @@ static void osc_clipboard(te_term *t, const char *s, size_t len)
     TE_FREE(buf);
 }
 
+/* The OSC 7 host identifies this machine: empty, "localhost", or our own host
+ * name (compared up to the first dot, case-insensitively). A remote shell (e.g.
+ * over ssh) reports its own host, so its path is not applied as our local cwd. */
+static bool osc7_host_is_local(const char *host, size_t hlen)
+{
+    if (hlen == 0 || (hlen == 9 && strncasecmp(host, "localhost", 9) == 0)) {
+        return true;
+    }
+    char local[256] = { 0 };
+    if (!os_hostname(local, sizeof local)) {
+        return false;
+    }
+    size_t ll = strcspn(local, ".");
+    const char *dot = memchr(host, '.', hlen);
+    size_t hl = dot != nullptr ? (size_t)(dot - host) : hlen;
+    return hl == ll && strncasecmp(host, local, ll) == 0;
+}
+
 static void osc_cwd(te_term *t, const char *s, size_t len)
 {
     /* file://host/path, percent-encoded */
@@ -1508,6 +1531,9 @@ static void osc_cwd(te_term *t, const char *s, size_t len)
     const char *path = memchr(s + 7, '/', len - 7);
     if (path == nullptr) {
         return;
+    }
+    if (!osc7_host_is_local(s + 7, (size_t)(path - (s + 7)))) {
+        return;   /* another host's working directory is not ours to switch to */
     }
     size_t i = (size_t)(path - s);
     size_t o = 0;
@@ -1521,6 +1547,9 @@ static void osc_cwd(te_term *t, const char *s, size_t len)
             }
             c = (char)((h1 << 4) | h2);
             i += 2;
+        }
+        if ((unsigned char)c < 0x20 || (unsigned char)c == 0x7F) {
+            return;   /* control bytes never belong in a path */
         }
         if (o + 1 >= sizeof out) {
             return;

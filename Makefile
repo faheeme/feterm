@@ -8,7 +8,7 @@ NAME       ?= feterm
 DISPLAY_NAME ?= FeTerm
 AUTHOR     ?= Faheem Essack
 EMAIL      ?= faheem.essack@gmail.com
-VERSION    ?= 0.5.0
+VERSION    ?= 0.5.1
 APP_ID     ?= io.gitlab.faheeme.$(NAME)
 PREFIX     ?= /usr/local
 DATADIR    ?= $(PREFIX)/share/$(NAME)
@@ -138,6 +138,39 @@ $(BUILD)/test_core$(EXE): $(TEST_SRC) $(wildcard tests/*.inc) $(GEN)/app_name.h
 
 test: $(BUILD)/test_core$(EXE)
 	$(TEST_RUN) ./$(BUILD)/test_core$(EXE)
+
+# libFuzzer targets for the untrusted-input parsers (needs clang). One binary per
+# FUZZ_TARGET; run e.g. ./build/fuzz_term -max_total_time=60 corpus/. FUZZ_CC and
+# FUZZ_TIME can be overridden. The sources are the unit-test set minus test_core.c.
+FUZZ_CC   ?= clang
+FUZZ_TIME ?= 30
+FUZZ_SRC  := $(filter-out tests/test_core.c,$(TEST_SRC))
+FUZZ_NAMES := term sftp unescape sixel ini
+FUZZ_BINS  := $(addprefix $(BUILD)/fuzz_,$(FUZZ_NAMES))
+FUZZ_SAN   := -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+
+$(BUILD)/fuzz_term:     FUZZ_N := 1
+$(BUILD)/fuzz_sftp:     FUZZ_N := 2
+$(BUILD)/fuzz_unescape: FUZZ_N := 3
+$(BUILD)/fuzz_sixel:    FUZZ_N := 4
+$(BUILD)/fuzz_ini:      FUZZ_N := 5
+
+$(FUZZ_BINS): $(BUILD)/fuzz_%: tests/fuzz.c $(FUZZ_SRC) $(wildcard tests/*.inc) $(GEN)/app_name.h
+	@mkdir -p $(@D)
+	$(FUZZ_CC) $(CPPFLAGS) -std=c23 -Wno-missing-prototypes -g -O1 -DFUZZ_TARGET=$(FUZZ_N) $(FUZZ_SAN) \
+	    $(shell $(PKG_CONFIG) --cflags libpcre2-8) tests/fuzz.c $(FUZZ_SRC) -o $@ \
+	    $(shell $(PKG_CONFIG) --libs libpcre2-8) -lm
+
+fuzz: $(FUZZ_BINS)
+	@for b in $(FUZZ_BINS); do echo "== $$b"; ASAN_OPTIONS=detect_leaks=1 \
+	    $$b -max_total_time=$(FUZZ_TIME) -print_final_stats=1 || exit 1; done
+
+# Reproduce a crash/corpus file with plain gcc (no libFuzzer): make fuzz-standalone ARGS="file..."
+fuzz-standalone:
+	$(CC) $(CPPFLAGS) -std=c23 -Wno-missing-prototypes -g -O1 -DFUZZ_TARGET=$(or $(T),1) -DFUZZ_STANDALONE \
+	    $(TEST_SAN) $(shell $(PKG_CONFIG) --cflags libpcre2-8) tests/fuzz.c $(FUZZ_SRC) -o $(BUILD)/fuzz_standalone \
+	    $(shell $(PKG_CONFIG) --libs libpcre2-8) -lm
+	./$(BUILD)/fuzz_standalone $(ARGS)
 
 # AddressSanitizer + UndefinedBehaviorSanitizer build.
 debug:
