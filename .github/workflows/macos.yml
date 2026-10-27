@@ -67,7 +67,12 @@ jobs:
           log="$RUNNER_TEMP/feterm.log"
           rm -f "$out"
           # perl's alarm stands in for timeout(1), which macOS lacks.
-          perl -e 'alarm 60; exec @ARGV' ./feterm --verbose -e /bin/sh -c "tty > '$out'; stty size >> '$out'; locale charmap >> '$out'" 2> "$log" || true
+          status=0
+          perl -e 'alarm 60; exec @ARGV' ./feterm --verbose -e /bin/sh -c "tty > '$out'; stty size >> '$out'; locale charmap >> '$out'" 2> "$log" || status=$?
+          echo "feterm exit status: $status"
+          echo "--- feterm log"; cat "$log"; echo "---"
+          # A crash leaves a report; show it so the cause is in this log.
+          ls -t ~/Library/Logs/DiagnosticReports/feterm* 2>/dev/null | head -1 | xargs -r head -80
           cat "$out"
           grep -q '^/dev/ttys' "$out"
           # SDL's Window menu must no longer own Cmd+W (it is close_pane).
