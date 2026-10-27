@@ -192,6 +192,7 @@ $(FUZZ_BINS): $(BUILD)/fuzz_%: tests/fuzz.c $(FUZZ_SRC) $(wildcard tests/*.inc) 
 
 fuzz: $(FUZZ_BINS)
 	@for b in $(FUZZ_BINS); do echo "== $$b"; ASAN_OPTIONS=detect_leaks=1 \
+	    LSAN_OPTIONS=suppressions=tests/lsan-fuzz.supp:print_suppressions=1 \
 	    $$b -max_total_time=$(FUZZ_TIME) -print_final_stats=1 || exit 1; done
 
 # Reproduce a crash/corpus file with plain gcc (no libFuzzer): make fuzz-standalone ARGS="file..."

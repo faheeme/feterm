@@ -1,0 +1,8 @@
+# LeakSanitizer suppressions for `make fuzz`. Only libFuzzer's own allocations
+# belong here, matched by frames that never appear above FeTerm code: a rule
+# such as "leak:fuzzer::" would also hide real leaks, because every input runs
+# under libFuzzer's driver frames.
+
+# libFuzzer's RSS-monitor std::thread is never joined (seen on macOS arm64).
+leak:fuzzer::StartRssThread
+leak:std::__1::__thread_struct::__thread_struct
