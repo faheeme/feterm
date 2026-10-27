@@ -57,6 +57,11 @@ te_err os_config_base(char *out, size_t outsz)
     return env_path(L"APPDATA", out, outsz);
 }
 
+te_err os_local_data_base(char *out, size_t outsz)
+{
+    return env_path(L"LOCALAPPDATA", out, outsz);
+}
+
 te_err os_self_exe(char *out, size_t outsz)
 {
     if (out == nullptr || outsz < 2) {

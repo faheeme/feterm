@@ -121,7 +121,8 @@ $(NAME)-helper.exe: $(HELPER_SRC:%.c=$(BUILD)/%.o) $(BUILD)/libapp.a $(RES)
 TEST_SRC := $(filter-out $(if $(WINDOWS),$(POSIX_ONLY) $(HELPER_SRC),$(WIN_ONLY)),$(wildcard src/util/*.c src/config/*.c src/vt/*.c \
                 src/highlight/*.c src/ui/*.c src/sessions/*.c src/remote/*.c)) \
             src/input/keys.c src/input/click.c src/input/mouse.c src/input/keybind.c \
-            src/app/layout.c src/app/banner.c src/render/boxdraw.c tests/test_core.c
+            src/app/layout.c src/app/banner.c src/render/boxdraw.c tests/test_core.c \
+            $(if $(WINDOWS),src/pty/conpty_win.c)
 # MinGW has no sanitizers; a Windows build cross-compiled on Linux runs its tests under Wine.
 ifdef WINDOWS
 TEST_SAN ?=

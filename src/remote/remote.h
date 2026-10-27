@@ -6,7 +6,7 @@
  * as prompts and the answers written straight back, never stored.
  *
  * Folder listings, transfers and recursive operations are asynchronous: the
- * host watches the descriptors this module asks for and calls
+ * host watches the descriptors (Windows: events) this module asks for and calls
  * remote_fd_ready / remote_service. Transfers run one at a time from a
  * queue, each pipelined (up to 16 requests of 32 KiB in flight).
  *
@@ -24,6 +24,7 @@
 
 #include <stdbool.h>
 #include "common.h"
+#include "remote/proc.h"
 #include "sessions/session.h"
 #include "sessions/store.h"
 
@@ -70,7 +71,7 @@ typedef struct te_remote te_remote;
 
 typedef struct te_remote_host {
     void *user;
-    bool (*watch)(void *user, int fd, int *tag);
+    bool (*watch)(void *user, te_proc_obj obj, int *tag);   /* fd, or a waitable HANDLE on Windows */
     void (*unwatch)(void *user, int tag);
     void (*rearm)(void *user, int tag);
     void (*changed)(void *user);                         /* redraw */
@@ -135,8 +136,6 @@ size_t remote_transfers(const te_remote *r, const te_xfer **out);
 void remote_cancel_all(te_remote *r);
 void remote_retry_failed(te_remote *r);
 void remote_clear_finished(te_remote *r);
-
-/* Edit-locally watcher: returns its descriptor tag ownership via remote_fd_ready. */
 
 /* Pure helpers (exposed for tests). */
 [[nodiscard]] te_err remote_join(const char *dir, const char *name, char *out, size_t outsz);

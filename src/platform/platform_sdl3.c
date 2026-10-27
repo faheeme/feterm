@@ -363,6 +363,20 @@ static float pixel_density(te_platform *p)
     return d > 0.0f ? d : 1.0f;
 }
 
+/* A copy of a path from the system; on Windows with '/' separators, as every path in the app has. */
+static char *path_dup(const char *path)
+{
+    char *s = str_dup(path);
+#ifdef _WIN32
+    for (char *c = s; c != nullptr && *c != '\0'; c++) {
+        if (*c == '\\') {
+            *c = '/';
+        }
+    }
+#endif
+    return s;
+}
+
 static bool translate(te_platform *p, const SDL_Event *e, te_event *ev)
 {
     memset(ev, 0, sizeof *ev);
@@ -437,7 +451,7 @@ static bool translate(te_platform *p, const SDL_Event *e, te_event *ev)
     }
     case SDL_EVENT_DROP_FILE:
         ev->type = TE_EV_DROP;
-        ev->drop.path = e->drop.data != nullptr ? str_dup(e->drop.data) : nullptr;
+        ev->drop.path = e->drop.data != nullptr ? path_dup(e->drop.data) : nullptr;
         ev->drop.x = e->drop.x * dens;
         ev->drop.y = e->drop.y * dens;
         return true;
@@ -487,7 +501,7 @@ static void SDLCALL dialog_done(void *userdata, const char *const *filelist, int
         if (n > 0) {
             ev->dialog.paths = te_calloc(n, sizeof *ev->dialog.paths);
             for (size_t i = 0; ev->dialog.paths != nullptr && i < n; i++) {
-                ev->dialog.paths[i] = str_dup(filelist[i]);
+                ev->dialog.paths[i] = path_dup(filelist[i]);
                 if (ev->dialog.paths[i] != nullptr) {
                     ev->dialog.n++;
                 } else {

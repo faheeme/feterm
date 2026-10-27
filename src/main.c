@@ -902,10 +902,14 @@ static void host_files_dialog(void *user, te_dialog_kind kind, int request)
     plat_file_dialog(a->plat, kind, def, request);
 }
 
-static bool host_r_watch(void *user, int fd, int *tag)
+static bool host_r_watch(void *user, te_proc_obj obj, int *tag)
 {
     app *a = user;
-    return plat_watch_fd(a->plat, fd, tag) == TE_OK;
+#ifdef _WIN32
+    return plat_watch_handle(a->plat, obj, tag) == TE_OK;
+#else
+    return plat_watch_fd(a->plat, obj, tag) == TE_OK;
+#endif
 }
 
 static void host_r_unwatch(void *user, int tag)
@@ -2432,11 +2436,26 @@ int main(int argc, char **argv)
         a.sb_ready = true;
     }
     apply_files_config(&a);
+#ifdef _WIN32
+    {
+        /* No runtime directory here: %LOCALAPPDATA%, which only this user can read. */
+        char base[TE_PATH_MAX] = { 0 };
+        char app_dir[TE_PATH_MAX] = { 0 };
+        if (os_local_data_base(base, sizeof base) != TE_OK ||
+            str_fmt(app_dir, sizeof app_dir, "%s/%s", base, APP_NAME) != TE_OK ||
+            (mkdir(app_dir, 0700) != 0 && errno != EEXIST) ||
+            str_fmt(a.edit_root, sizeof a.edit_root, "%s/edit", app_dir) != TE_OK ||
+            (mkdir(a.edit_root, 0700) != 0 && errno != EEXIST)) {
+            a.edit_root[0] = '\0';   /* no private folder: edit-locally is unavailable */
+        }
+    }
+#else
     if (a.control_dir[0] != '\0' &&
         str_fmt(a.edit_root, sizeof a.edit_root, "%s/edit", a.control_dir) == TE_OK &&
         mkdir(a.edit_root, 0700) != 0 && errno != EEXIST) {
         a.edit_root[0] = '\0';   /* no private folder: edit-locally is unavailable */
     }
+#endif
 
     const te_font_metrics *m = font_metrics(a.font);
     int pad = padding_px(&a);

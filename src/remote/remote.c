@@ -14,11 +14,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "remote/proc.h"
 #include "remote/sftp_proto.h"
 #include "sessions/launch.h"
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/os.h"
 #include "util/str.h"
 
 #define MAX_PENDING   64
@@ -48,6 +48,9 @@ typedef struct req {
 
 typedef struct edit_watch {
     int      wd;
+#ifdef _WIN32
+    uint64_t stamp, size;  /* last write time and size last seen */
+#endif
     char    *local;
     char    *remote;
     char    *dir; /* the private folder holding the copy */
@@ -118,8 +121,12 @@ struct te_remote {
     te_proc         scp;
     int             tag_scp;
 
-    /* Edit locally */
+    /* Edit locally: what tells us an edited copy changed */
+#ifdef _WIN32
+    HANDLE          edit_note;       /* change notification on edit_dir, or nullptr */
+#else
     int             ino_fd;
+#endif
     int             tag_ino;
     edit_watch      edits[EDIT_MAX];
     size_t          nedits;
@@ -170,15 +177,43 @@ bool remote_local_name(const char *remote_name, char *out, size_t outsz)
         if (c < 0x20 || c == 0x7F) {
             continue;   /* control characters never reach a local file name */
         }
-        out[k++] = (c == '/' || c == '\\') ? '_' : (char)c;
+#ifdef _WIN32
+        /* Windows also refuses these; "a:b" would even name a hidden stream of file "a". */
+        bool bad = c == '/' || c == '\\' || strchr(":*?\"<>|", c) != nullptr;
+#else
+        bool bad = c == '/' || c == '\\';
+#endif
+        out[k++] = bad ? '_' : (char)c;
     }
     out[k] = '\0';
+#ifdef _WIN32
+    while (k > 0 && (out[k - 1] == '.' || out[k - 1] == ' ')) {
+        out[--k] = '\0';   /* Windows drops trailing dots and spaces, so "a." would become "a" */
+    }
+#endif
     if (k == 0 || strcmp(out, ".") == 0 || strcmp(out, "..") == 0) {
         return false;
     }
     if (out[0] == '-') {
         out[0] = '_';   /* a file named "-rf" is an accident waiting to happen */
     }
+#ifdef _WIN32
+    /* Device names (CON, NUL, COM1...) are devices in every folder, with any extension. */
+    static const char *const devices[] = { "CON", "PRN", "AUX", "NUL", "COM", "LPT" };
+    for (size_t i = 0; i < TE_ARRAY_LEN(devices); i++) {
+        bool numbered = i >= 4;
+        size_t stem = numbered ? 4 : 3;
+        if (strncasecmp(out, devices[i], 3) == 0 && (!numbered || (out[3] >= '1' && out[3] <= '9')) &&
+            (out[stem] == '\0' || out[stem] == '.')) {
+            if (k + 1 >= outsz) {
+                return false;
+            }
+            memmove(out + 1, out, k + 1);
+            out[0] = '_';
+            break;
+        }
+    }
+#endif
     return true;
 }
 
@@ -459,10 +494,15 @@ static size_t add_common_ssh_opts(te_remote *r, const char **argv, size_t n, cha
     return n;
 }
 
-static bool watch_fd(te_remote *r, int fd, int *tag)
+static bool watch_obj(te_remote *r, te_proc_obj obj, int *tag)
 {
     *tag = -1;
-    return fd >= 0 && r->host.watch != nullptr && r->host.watch(r->host.user, fd, tag);
+#ifdef _WIN32
+    bool valid = obj != nullptr;
+#else
+    bool valid = obj >= 0;
+#endif
+    return valid && r->host.watch != nullptr && r->host.watch(r->host.user, obj, tag);
 }
 
 void remote_connect(te_remote *r)
@@ -483,12 +523,20 @@ void remote_connect(te_remote *r)
     argv[n] = nullptr;
     r->tty_len = 0;
     r->error[0] = '\0';
-    if (proc_spawn(&r->proc, argv) != TE_OK) {
+    te_err rc = proc_spawn(&r->proc, argv);
+    if (rc != TE_OK) {
+        char why[256] = { 0 };
+        const char *detail = proc_spawn_error();
+        if (rc == TE_ERR_NOTFOUND) {
+            (void)str_copy(why, sizeof why, "ssh was not found: install the OpenSSH client");
+        } else {
+            (void)str_fmt(why, sizeof why, detail[0] != '\0' ? "could not start ssh: %s" : "could not start ssh%s", detail);
+        }
         r->state = TE_RS_IDLE;
-        fail_conn(r, "could not start ssh");
+        fail_conn(r, why);
         return;
     }
-    if (!watch_fd(r, r->proc.out_fd, &r->tag_out) || !watch_fd(r, r->proc.tty_fd, &r->tag_tty)) {
+    if (!watch_obj(r, proc_out_obj(&r->proc), &r->tag_out) || !watch_obj(r, proc_tty_obj(&r->proc), &r->tag_tty)) {
         r->state = TE_RS_IDLE;
         fail_conn(r, "could not watch the connection");
         return;
@@ -620,7 +668,7 @@ void remote_answer(te_remote *r, const char *answer)
     r->prompting = false;
     te_proc *p = r->prompt_proc;
     r->prompt_proc = nullptr;
-    if (answer == nullptr || p == nullptr || p->tty_fd < 0) {
+    if (answer == nullptr || p == nullptr || !proc_tty_open(p)) {
         if (p == &r->scp) {
             proc_stop(&r->scp);
             unwatch(r, &r->tag_scp);
@@ -636,10 +684,10 @@ void remote_answer(te_remote *r, const char *answer)
     buf[n++] = '\n';
     size_t done = 0;
     for (int tries = 0; done < n && tries < 100; tries++) {
-        ssize_t w = write(p->tty_fd, buf + done, n - done);
+        ssize_t w = proc_write_tty(p, buf + done, n - done);
         if (w > 0) {
             done += (size_t)w;
-        } else if (w < 0 && errno != EAGAIN && errno != EINTR) {
+        } else if (w < 0) {
             break;
         }
     }
@@ -655,7 +703,7 @@ static void read_tty(te_remote *r, te_proc *p, int *tag)
 {
     char buf[1024] = { 0 };
     for (;;) {
-        ssize_t n = read(p->tty_fd, buf, sizeof buf);
+        ssize_t n = proc_read_tty(p, buf, sizeof buf);
         if (n > 0) {
             static_assert(sizeof buf < TTY_KEEP, "one read must fit in the kept text");
             size_t len = (size_t)n;
@@ -668,15 +716,12 @@ static void read_tty(te_remote *r, te_proc *p, int *tag)
             r->tty_len += len;
             continue;
         }
-        if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
+        if (n == 0) {
             break;
         }
-        /* EOF or EIO: every holder of the terminal (the child) has gone. */
+        /* End of file: every holder of the terminal (the child) has gone. */
         unwatch(r, tag);
-        if (p->tty_fd >= 0) {
-            close(p->tty_fd);
-            p->tty_fd = -1;
-        }
+        proc_close_tty(p);
         return;
     }
     explicit_bzero(buf, sizeof buf);
@@ -1417,13 +1462,10 @@ static void read_out(te_remote *r)
             fail_conn(r, "oversized SFTP packet");
             return;
         }
-        ssize_t n = read(r->proc.out_fd, r->in + r->in_len, IN_LIMIT - r->in_len);
+        ssize_t n = proc_read_out(&r->proc, r->in + r->in_len, IN_LIMIT - r->in_len);
         if (n > 0) {
             r->in_len += (size_t)n;
         } else if (n == 0) {
-            child_exited(r);
-            return;
-        } else if (errno == EAGAIN || errno == EINTR) {
             break;
         } else {
             child_exited(r);
@@ -1440,7 +1482,7 @@ static void read_out(te_remote *r)
             }
             handle_reply(r, &rep);
             sftp_reply_free(&rep);
-            if (r->state == TE_RS_FAILED || r->proc.out_fd < 0) {
+            if (r->state == TE_RS_FAILED || !proc_out_open(&r->proc)) {
                 return;
             }
             memmove(r->in, r->in + total, r->in_len - total);
@@ -1489,22 +1531,22 @@ static void start_scp(te_remote *r, te_xfer *x)
     }
     argv[n] = nullptr;
     r->tty_len = 0;
-    if (proc_spawn(&r->scp, argv) != TE_OK || !watch_fd(r, r->scp.tty_fd, &r->tag_scp)) {
+    te_err rc = proc_spawn(&r->scp, argv);
+    if (rc != TE_OK || !watch_obj(r, proc_tty_obj(&r->scp), &r->tag_scp)) {
         proc_stop(&r->scp);
-        fail_active(r, "could not start scp");
+        fail_active(r, rc == TE_ERR_NOTFOUND ? "scp was not found: install the OpenSSH client" : "could not start scp");
         return;
     }
-    close(r->scp.in_fd);
-    r->scp.in_fd = -1;
+    proc_close_in(&r->scp);
 }
 
 static void scp_check(te_remote *r)
 {
-    if (r->active == NO_XFER || r->scp.pid <= 0) {
+    if (r->active == NO_XFER || !proc_running(&r->scp)) {
         return;
     }
     int st = 0;
-    if (r->scp.tty_fd >= 0 || !proc_reap(&r->scp, &st)) {
+    if (proc_tty_open(&r->scp) || !proc_reap(&r->scp, &st)) {
         return;   /* still running (its terminal is open) */
     }
     unwatch(r, &r->tag_scp);
@@ -1558,49 +1600,101 @@ void remote_scp_download(te_remote *r, const char *remote_path, const char *loca
 /* ------------------------------------------------------------------------- */
 /* Edit locally */
 
-static void add_edit_watch(te_remote *r, const char *local, const char *remote)
+/*
+ * Change notification for the edited copies. Linux: inotify on each copy's
+ * private folder, matched by name. Windows: one notification for the whole
+ * editing folder (it does not say which file), after which each copy's write
+ * time and size are compared with what was last seen.
+ */
+#ifdef _WIN32
+static bool file_stamp(const char *path, uint64_t *stamp, uint64_t *size)
 {
-    if (r->nedits >= EDIT_MAX) {
-        toast(r, "Too many files open for editing");
-        return;
+    wchar_t *w = te_w_widen(path);
+    WIN32_FILE_ATTRIBUTE_DATA d = { 0 };
+    bool ok = w != nullptr && GetFileAttributesExW(w, GetFileExInfoStandard, &d);
+    TE_FREE(w);
+    if (ok) {
+        *stamp = ((uint64_t)d.ftLastWriteTime.dwHighDateTime << 32) | d.ftLastWriteTime.dwLowDateTime;
+        *size = ((uint64_t)d.nFileSizeHigh << 32) | d.nFileSizeLow;
     }
-    if (r->ino_fd < 0) {
-        r->ino_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-        if (r->ino_fd < 0 || !watch_fd(r, r->ino_fd, &r->tag_ino)) {
-            toast(r, "Cannot watch the edited file; changes will not be uploaded");
-            return;
+    return ok;
+}
+
+static bool edit_notify_add(te_remote *r, const char *dir, int *wd)
+{
+    (void)dir;   /* the copies all live under edit_dir */
+    *wd = 0;
+    if (r->edit_note == nullptr) {
+        wchar_t *w = te_w_widen(r->edit_dir);
+        HANDLE h = w != nullptr ? FindFirstChangeNotificationW(w, TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE |
+                                                                            FILE_NOTIFY_CHANGE_FILE_NAME |
+                                                                            FILE_NOTIFY_CHANGE_SIZE)
+                                : INVALID_HANDLE_VALUE;
+        TE_FREE(w);
+        if (h == INVALID_HANDLE_VALUE || h == nullptr) {
+            return false;
+        }
+        r->edit_note = h;
+        if (!watch_obj(r, h, &r->tag_ino)) {
+            (void)FindCloseChangeNotification(h);
+            r->edit_note = nullptr;
+            return false;
         }
     }
-    char dir[TE_REMOTE_PATH_MAX] = { 0 };
-    const char *slash = strrchr(local, '/');
-    if (slash == nullptr || str_copy_n(dir, sizeof dir, local, (size_t)(slash - local)) != TE_OK) {
+    return true;
+}
+
+static void edit_notify_drain(te_remote *r)
+{
+    if (r->edit_note == nullptr) {
         return;
     }
-    int wd = inotify_add_watch(r->ino_fd, dir, IN_CLOSE_WRITE | IN_MOVED_TO);
-    if (wd < 0) {
-        toast(r, "Cannot watch the edited file; changes will not be uploaded");
+    if (!FindNextChangeNotification(r->edit_note)) {
+        unwatch(r, &r->tag_ino);   /* the folder went away */
+        (void)FindCloseChangeNotification(r->edit_note);
+        r->edit_note = nullptr;
         return;
     }
-    edit_watch *e = &r->edits[r->nedits];
-    memset(e, 0, sizeof *e);
-    e->wd = wd;
-    e->local = str_dup(local);
-    e->remote = str_dup(remote);
-    e->dir = str_dup(dir);
-    if (e->local == nullptr || e->remote == nullptr || e->dir == nullptr) {
-        TE_FREE(e->local);
-        TE_FREE(e->remote);
-        TE_FREE(e->dir);
-        return;
+    uint64_t now = now_ms();
+    for (size_t i = 0; i < r->nedits; i++) {
+        edit_watch *e = &r->edits[i];
+        uint64_t stamp = 0;
+        uint64_t size = 0;
+        if (file_stamp(e->local, &stamp, &size) && (stamp != e->stamp || size != e->size)) {
+            e->stamp = stamp;
+            e->size = size;
+            if (now >= e->ignore_until) {
+                e->due = now + EDIT_SETTLE_MS;   /* editors save in bursts */
+            }
+        }
     }
-    e->ignore_until = now_ms() + 1000u;
-    r->nedits++;
-    if (r->host.edit_open != nullptr) {
-        r->host.edit_open(r->host.user, local);
+    if (r->tag_ino >= 0 && r->host.rearm != nullptr) {
+        r->host.rearm(r->host.user, r->tag_ino);
     }
 }
 
-static void read_inotify(te_remote *r)
+static void edit_notify_close(te_remote *r)
+{
+    unwatch(r, &r->tag_ino);
+    if (r->edit_note != nullptr) {
+        (void)FindCloseChangeNotification(r->edit_note);
+        r->edit_note = nullptr;
+    }
+}
+#else
+static bool edit_notify_add(te_remote *r, const char *dir, int *wd)
+{
+    if (r->ino_fd < 0) {
+        r->ino_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+        if (r->ino_fd < 0 || !watch_obj(r, r->ino_fd, &r->tag_ino)) {
+            return false;
+        }
+    }
+    *wd = inotify_add_watch(r->ino_fd, dir, IN_CLOSE_WRITE | IN_MOVED_TO);
+    return *wd >= 0;
+}
+
+static void edit_notify_drain(te_remote *r)
 {
     _Alignas(struct inotify_event) char buf[4096];
     for (;;) {
@@ -1635,6 +1729,54 @@ static void read_inotify(te_remote *r)
     }
 }
 
+static void edit_notify_close(te_remote *r)
+{
+    unwatch(r, &r->tag_ino);
+    if (r->ino_fd >= 0) {
+        close(r->ino_fd);
+        r->ino_fd = -1;
+    }
+}
+#endif
+
+static void add_edit_watch(te_remote *r, const char *local, const char *remote)
+{
+    if (r->nedits >= EDIT_MAX) {
+        toast(r, "Too many files open for editing");
+        return;
+    }
+    char dir[TE_REMOTE_PATH_MAX] = { 0 };
+    const char *slash = strrchr(local, '/');
+    if (slash == nullptr || str_copy_n(dir, sizeof dir, local, (size_t)(slash - local)) != TE_OK) {
+        return;
+    }
+    int wd = -1;
+    if (!edit_notify_add(r, dir, &wd)) {
+        toast(r, "Cannot watch the edited file; changes will not be uploaded");
+        return;
+    }
+    edit_watch *e = &r->edits[r->nedits];
+    memset(e, 0, sizeof *e);
+    e->wd = wd;
+    e->local = str_dup(local);
+    e->remote = str_dup(remote);
+    e->dir = str_dup(dir);
+    if (e->local == nullptr || e->remote == nullptr || e->dir == nullptr) {
+        TE_FREE(e->local);
+        TE_FREE(e->remote);
+        TE_FREE(e->dir);
+        return;
+    }
+#ifdef _WIN32
+    (void)file_stamp(local, &e->stamp, &e->size);   /* the downloaded copy, as a baseline */
+#endif
+    e->ignore_until = now_ms() + 1000u;
+    r->nedits++;
+    if (r->host.edit_open != nullptr) {
+        r->host.edit_open(r->host.user, local);
+    }
+}
+
 static void service_edits(te_remote *r)
 {
     uint64_t now = now_ms();
@@ -1653,7 +1795,7 @@ void remote_edit(te_remote *r, const char *name)
     if (e == nullptr || e->dir) {
         return;
     }
-    if (r->edit_dir[0] != '/') {
+    if (!os_path_is_absolute(r->edit_dir)) {
         toast(r, "No private folder for editing");
         return;
     }
@@ -1919,7 +2061,9 @@ te_err remote_create(te_remote **out, const te_session *s, const te_session_eff 
     proc_init(&r->scp);
     sbuf_init(&r->out, OUT_LIMIT);
     r->tag_out = r->tag_tty = r->tag_scp = r->tag_ino = -1;
+#ifndef _WIN32
     r->ino_fd = -1;
+#endif
     r->xfd = -1;
     r->xdirfd = -1;
     r->active = NO_XFER;
@@ -1938,11 +2082,7 @@ void remote_destroy(te_remote **rp)
     stop_proc(r);
     unwatch(r, &r->tag_scp);
     proc_stop(&r->scp);
-    unwatch(r, &r->tag_ino);
-    if (r->ino_fd >= 0) {
-        close(r->ino_fd);
-        r->ino_fd = -1;
-    }
+    edit_notify_close(r);
     for (size_t i = 0; i < r->nedits; i++) {
         /* Remove only the copies FeTerm made, and their private folders. */
         (void)unlink(r->edits[i].local);
@@ -1978,7 +2118,7 @@ bool remote_fd_ready(te_remote *r, int tag)
         read_tty(r, &r->scp, &r->tag_scp);
         scp_check(r);
     } else if (tag == r->tag_ino) {
-        read_inotify(r);
+        edit_notify_drain(r);
     } else {
         return false;
     }
@@ -1991,18 +2131,18 @@ void remote_service(te_remote *r)
     if (r == nullptr) {
         return;
     }
-    while (r->out.len > 0 && r->proc.in_fd >= 0) {
-        ssize_t n = write(r->proc.in_fd, r->out.data, r->out.len);
+    while (r->out.len > 0 && proc_in_open(&r->proc)) {
+        ssize_t n = proc_write_in(&r->proc, r->out.data, r->out.len);
         if (n > 0) {
             sbuf_consume(&r->out, (size_t)n);
-        } else if (n < 0 && (errno == EAGAIN || errno == EINTR)) {
+        } else if (n == 0) {
             break;
         } else {
             child_exited(r);
             return;
         }
     }
-    if (r->proc.pid > 0 && r->proc.out_fd < 0 && r->proc.tty_fd < 0) {
+    if (proc_running(&r->proc) && !proc_out_open(&r->proc) && !proc_tty_open(&r->proc)) {
         child_exited(r);
     }
     scp_check(r);
@@ -2015,7 +2155,7 @@ bool remote_busy(const te_remote *r)
     if (r == nullptr) {
         return false;
     }
-    if (r->out.len > 0 || r->scp.pid > 0) {
+    if (r->out.len > 0 || proc_running(&r->scp)) {
         return true;
     }
     for (size_t i = 0; i < r->nedits; i++) {
@@ -2079,7 +2219,7 @@ void remote_cancel_all(te_remote *r)
         }
     }
     if (r->active != NO_XFER) {
-        if (r->scp.pid > 0) {
+        if (proc_running(&r->scp)) {
             unwatch(r, &r->tag_scp);
             proc_stop(&r->scp);
         }

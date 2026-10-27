@@ -15,6 +15,7 @@
 #include <string.h>
 #include <wchar.h>
 
+#include "pty/conpty_win.h"
 #include "sessions/helper_con.h"
 #include "util/log.h"
 #include "util/mem.h"
@@ -23,25 +24,6 @@
 #include "util/winargs.h"
 
 #define OUT_CAP      (1u << 20)   /* output buffered before the reader waits for the UI */
-
-#ifndef PSEUDOCONSOLE_INHERIT_CURSOR
-#define PSEUDOCONSOLE_INHERIT_CURSOR 0x1
-#endif
-#ifndef PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
-#define PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE 0x00020016
-#endif
-
-typedef void *te_hpcon;
-typedef HRESULT (WINAPI *create_pc_fn)(COORD size, HANDLE in, HANDLE out, DWORD flags, te_hpcon *pc);
-typedef HRESULT (WINAPI *resize_pc_fn)(te_hpcon pc, COORD size);
-typedef void (WINAPI *close_pc_fn)(te_hpcon pc);
-
-static struct {
-    bool         loaded;
-    create_pc_fn create;
-    resize_pc_fn resize;
-    close_pc_fn  close;
-} conpty;
 
 struct te_conpty {
     te_hpcon           hpc;          /* guarded by lock; nullptr once closed */
@@ -62,41 +44,6 @@ struct te_conpty {
     bool               reaped;
     int                status;
 };
-
-/* GetProcAddress hands back a FARPROC; copy it into the real function type. */
-static bool load_sym(HMODULE m, const char *name, void *fn_out, size_t fn_size)
-{
-    FARPROC f = GetProcAddress(m, name);
-    if (f == nullptr || fn_size != sizeof f) {
-        return false;
-    }
-    memcpy(fn_out, &f, fn_size);
-    return true;
-}
-
-static bool load_conpty(void)
-{
-    if (conpty.loaded) {
-        return conpty.create != nullptr;
-    }
-    conpty.loaded = true;
-    HMODULE k = GetModuleHandleW(L"kernel32.dll");
-    if (k == nullptr || !load_sym(k, "CreatePseudoConsole", &conpty.create, sizeof conpty.create) ||
-        !load_sym(k, "ResizePseudoConsole", &conpty.resize, sizeof conpty.resize) ||
-        !load_sym(k, "ClosePseudoConsole", &conpty.close, sizeof conpty.close)) {
-        conpty.create = nullptr;
-        LOG_E("this Windows has no pseudo console (ConPTY needs Windows 10 version 1809 or newer)");
-        return false;
-    }
-    return true;
-}
-
-/* Wine's ConPTY lacks some flags; it is only used for smoke tests on Linux. */
-static bool running_on_wine(void)
-{
-    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
-}
 
 void pty_init(te_pty *p)
 {
@@ -249,7 +196,7 @@ static void close_console(te_conpty *c)
     c->hpc = nullptr;
     ReleaseSRWLockExclusive(&c->lock);
     if (h != nullptr) {
-        conpty.close(h);   /* may wait for the reader to drain the last output */
+        conpty_close(h);   /* may wait for the reader to drain the last output */
     }
 }
 
@@ -326,7 +273,7 @@ te_err pty_spawn(te_pty *p, const te_pty_opts *o)
     if (p == nullptr || o == nullptr || p->con != nullptr) {
         return TE_ERR_INVAL;
     }
-    if (!load_conpty()) {
+    if (!conpty_load()) {
         return TE_ERR_PLATFORM;
     }
     te_err rc = TE_ERR_SYS;
@@ -380,8 +327,8 @@ te_err pty_spawn(te_pty *p, const te_pty_opts *o)
     }
     /* Inherit the cursor: ConPTY asks where it is (ESC[6n) and starts drawing there, below
      * anything already on screen (the welcome banner), instead of repainting from the top. */
-    DWORD pc_flags = running_on_wine() ? 0 : PSEUDOCONSOLE_INHERIT_CURSOR;
-    HRESULT hr = conpty.create(console_size(o->cols, o->rows), in_r, out_w, pc_flags, &c->hpc);
+    DWORD pc_flags = conpty_on_wine() ? 0 : PSEUDOCONSOLE_INHERIT_CURSOR;
+    HRESULT hr = conpty_create(console_size(o->cols, o->rows), in_r, out_w, pc_flags, &c->hpc);
     /* The console holds its own copies of its pipe ends. */
     CloseHandle(in_r);
     in_r = nullptr;
@@ -484,7 +431,7 @@ te_err pty_resize(te_pty *p, uint16_t cols, uint16_t rows, uint16_t px_w, uint16
     te_conpty *c = p->con;
     te_err rc = TE_OK;
     AcquireSRWLockExclusive(&c->lock);
-    if (c->hpc != nullptr && FAILED(conpty.resize(c->hpc, console_size(cols, rows)))) {
+    if (c->hpc != nullptr && FAILED(conpty_resize(c->hpc, console_size(cols, rows)))) {
         rc = TE_ERR_SYS;
     }
     ReleaseSRWLockExclusive(&c->lock);

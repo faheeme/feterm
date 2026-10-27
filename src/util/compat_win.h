@@ -78,30 +78,6 @@
 
 typedef int te_uid_t;
 
-/* inotify does not exist here: the remote editor's change watch reports itself unavailable. */
-#define IN_NONBLOCK    0
-#define IN_CLOEXEC     0
-#define IN_CLOSE_WRITE 0x8u
-#define IN_MOVED_TO    0x80u
-struct inotify_event {
-    int      wd;
-    uint32_t mask, cookie, len;
-    char     name[];
-};
-static inline int inotify_init1(int flags)
-{
-    (void)flags;
-    errno = ENOSYS;
-    return -1;
-}
-static inline int inotify_add_watch(int fd, const char *path, uint32_t mask)
-{
-    (void)fd;
-    (void)path;
-    (void)mask;
-    errno = ENOSYS;
-    return -1;
-}
 
 int te_w_open(const char *path, int flags, ...);
 int te_w_openat(int dirfd, const char *name, int flags, ...);

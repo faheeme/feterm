@@ -161,6 +161,15 @@ static void test_remote_helpers(void)
     CHECK(!remote_local_name("\x01\x02", out, sizeof out));
     CHECK(remote_local_name("bad\x1b[31mname", out, sizeof out) && strchr(out, 0x1b) == nullptr);
     CHECK(remote_local_name("-rf", out, sizeof out) && out[0] == '_');
+#ifdef _WIN32
+    CHECK(remote_local_name("C:\\Users\\me\\test.bin", out, sizeof out) && strcmp(out, "C__Users_me_test.bin") == 0);
+    CHECK(remote_local_name("a*b?c\"d<e>f|g", out, sizeof out) && strcmp(out, "a_b_c_d_e_f_g") == 0);
+    CHECK(remote_local_name("notes. . ", out, sizeof out) && strcmp(out, "notes") == 0);
+    CHECK(!remote_local_name("...", out, sizeof out));
+    CHECK(remote_local_name("nul.txt", out, sizeof out) && strcmp(out, "_nul.txt") == 0);
+    CHECK(remote_local_name("COM1", out, sizeof out) && strcmp(out, "_COM1") == 0);
+    CHECK(remote_local_name("console.log", out, sizeof out) && strcmp(out, "console.log") == 0);
+#endif
 
     char q[128] = { 0 };
     CHECK(remote_scp_quote("flash:/config.text", q, sizeof q) && strcmp(q, "flash:/config.text") == 0);

@@ -22,4 +22,9 @@
 /* Absolute path of the running executable. */
 [[nodiscard]] te_err os_self_exe(char *out, size_t outsz);
 
+#ifdef _WIN32
+/* %LOCALAPPDATA%: per-user data that stays on this machine. */
+[[nodiscard]] te_err os_local_data_base(char *out, size_t outsz);
+#endif
+
 #endif

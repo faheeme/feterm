@@ -12,6 +12,14 @@
 #include <unistd.h>
 
 #include "util/log.h"
+#include "util/str.h"
+
+static char spawn_error[200];
+
+const char *proc_spawn_error(void)
+{
+    return spawn_error;
+}
 
 void proc_init(te_proc *p)
 {
@@ -74,6 +82,7 @@ te_err proc_spawn(te_proc *p, const char *const argv[])
     if (p == nullptr || argv == nullptr || argv[0] == nullptr || p->pid > 0) {
         return TE_ERR_INVAL;
     }
+    spawn_error[0] = '\0';
     int in_pipe[2] = { -1, -1 };
     int out_pipe[2] = { -1, -1 };
     int master = -1;
@@ -110,7 +119,8 @@ te_err proc_spawn(te_proc *p, const char *const argv[])
     return TE_OK;
 
 fail:
-    LOG_W("cannot start %s: %s", argv[0], strerror(errno));
+    (void)str_fmt(spawn_error, sizeof spawn_error, "%s", strerror(errno));
+    LOG_W("cannot start %s: %s", argv[0], spawn_error);
     close_fd(&in_pipe[0]);
     close_fd(&in_pipe[1]);
     close_fd(&out_pipe[0]);
@@ -155,4 +165,89 @@ void proc_stop(te_proc *p)
     (void)kill(p->pid, SIGKILL);
     (void)waitpid(p->pid, nullptr, 0);
     p->pid = -1;
+}
+
+bool proc_running(const te_proc *p)
+{
+    return p->pid > 0;
+}
+
+bool proc_in_open(const te_proc *p)
+{
+    return p->in_fd >= 0;
+}
+
+bool proc_out_open(const te_proc *p)
+{
+    return p->out_fd >= 0;
+}
+
+bool proc_tty_open(const te_proc *p)
+{
+    return p->tty_fd >= 0;
+}
+
+te_proc_obj proc_out_obj(const te_proc *p)
+{
+    return p->out_fd;
+}
+
+te_proc_obj proc_tty_obj(const te_proc *p)
+{
+    return p->tty_fd;
+}
+
+/* read(2) in the convention of proc.h: 0 means "nothing yet", -1 end of file or error. */
+static ssize_t fd_read(int fd, void *buf, size_t len)
+{
+    if (fd < 0) {
+        return -1;
+    }
+    ssize_t n = read(fd, buf, len);
+    if (n > 0) {
+        return n;
+    }
+    return n < 0 && (errno == EAGAIN || errno == EINTR) ? 0 : -1;
+}
+
+static ssize_t fd_write(int fd, const void *buf, size_t len)
+{
+    if (fd < 0) {
+        return -1;
+    }
+    ssize_t n = write(fd, buf, len);
+    if (n >= 0) {
+        return n;
+    }
+    return errno == EAGAIN || errno == EINTR ? 0 : -1;
+}
+
+ssize_t proc_write_in(te_proc *p, const void *buf, size_t len)
+{
+    return fd_write(p->in_fd, buf, len);
+}
+
+ssize_t proc_read_out(te_proc *p, void *buf, size_t len)
+{
+    return fd_read(p->out_fd, buf, len);
+}
+
+ssize_t proc_read_tty(te_proc *p, void *buf, size_t len)
+{
+    return fd_read(p->tty_fd, buf, len);
+}
+
+ssize_t proc_write_tty(te_proc *p, const void *buf, size_t len)
+{
+    return fd_write(p->tty_fd, buf, len);
+}
+
+void proc_close_in(te_proc *p)
+{
+    close_fd(&p->in_fd);
+}
+
+void proc_close_tty(te_proc *p)
+{
+    close_fd(&p->tty_fd);
 }
