@@ -147,17 +147,39 @@ packaging/windows/winget.sh https://gitlab.com/.../feterm-X.Y.Z-windows-x64-setu
 ```
 
 It downloads the file, checks it matches `dist/`, and writes the three manifests to
-`dist/winget/manifests/f/FaheemEssack/FeTerm/X.Y.Z/`. On Windows, check them and open the
-pull request with Microsoft's tools:
+`dist/winget/manifests/f/FaheemEssack/FeTerm/X.Y.Z/`. Copy that folder to Windows and test
+it in an admin PowerShell:
 
 ```powershell
+winget settings --enable LocalManifestFiles     # once
 winget validate --manifest <that folder>
-winget install --manifest <that folder>      # needs: winget settings --enable LocalManifestFiles
-wingetcreate submit <that folder>            # forks winget-pkgs and opens the pull request
+winget install --manifest <that folder>         # then uninstall the test copy
 ```
 
-Microsoft's bots test the installer; the package appears in `winget search feterm` once a
-moderator merges it, usually within a few days. Later versions go the same way.
+Then open the pull request from Linux with the GitHub CLI (`gh auth login` once). The fork
+`<you>/winget-pkgs` already exists after the first time; a blobless sparse clone keeps the
+huge repository small:
+
+```sh
+git clone --filter=blob:none --no-checkout --depth 1 https://github.com/microsoft/winget-pkgs.git
+cd winget-pkgs
+git sparse-checkout set --no-cone /.github/PULL_REQUEST_TEMPLATE.md /manifests/f/FaheemEssack/
+git checkout master && git checkout -b FaheemEssack.FeTerm-X.Y.Z
+mkdir -p manifests/f/FaheemEssack/FeTerm/X.Y.Z
+cp <repo>/dist/winget/manifests/f/FaheemEssack/FeTerm/X.Y.Z/*.yaml manifests/f/FaheemEssack/FeTerm/X.Y.Z/
+git add manifests && git commit -m "Update: FaheemEssack.FeTerm to X.Y.Z"
+git -c credential.helper='!gh auth git-credential' push https://github.com/<you>/winget-pkgs.git HEAD
+gh pr create -R microsoft/winget-pkgs --head <you>:FaheemEssack.FeTerm-X.Y.Z \
+    --title "Update: FaheemEssack.FeTerm to X.Y.Z"
+```
+
+Fill in the pull request template's checklist. (`wingetcreate submit <that folder>` on
+Windows does the same from there.) Microsoft's CLA is signed once, by replying
+`@microsoft-github-policy-service agree` on the first pull request. Bots install the package
+in a clean Windows VM and scan it, then a moderator merges it, usually within a few days.
+The first version was submitted as microsoft/winget-pkgs#462746. The bots that update
+packages automatically only follow GitHub releases, so every FeTerm version needs its own
+pull request.
 
 ### Unsigned builds
 
