@@ -8,7 +8,7 @@ NAME       ?= feterm
 DISPLAY_NAME ?= FeTerm
 AUTHOR     ?= Faheem Essack
 EMAIL      ?= faheem.essack@gmail.com
-VERSION    ?= 0.5.1
+VERSION    ?= 0.5.2
 APP_ID     ?= io.gitlab.faheeme.$(NAME)
 PREFIX     ?= /usr/local
 DATADIR    ?= $(PREFIX)/share/$(NAME)
@@ -96,7 +96,7 @@ SRC := $(OS_SRC)
 OBJ := $(SRC:%.c=$(BUILD)/%.o)
 DEP := $(OBJ:.o=.d)
 
-.PHONY: all clean debug analyze install uninstall test app dmg
+.PHONY: all clean debug analyze install uninstall test app app-unbundled dmg
 
 all: $(NAME)$(EXE) $(HELPER) $(BUILD)/$(APP_ID).desktop $(BUILD)/$(NAME).1
 
@@ -216,6 +216,23 @@ ICONDIR    := $(PREFIX)/share/icons/hicolor
 APPSDIR    := $(PREFIX)/share/applications
 MANDIR     := $(PREFIX)/share/man/man1
 
+ifdef MACOS
+# macOS (e.g. a Homebrew formula): the program, its data and the man page;
+# BSD install has no -D, and there is no desktop file or icon cache. fonts.conf
+# goes with the data so the bundled-libraries' default is not needed.
+install: $(NAME) $(BUILD)/$(NAME).1 $(BUILD)/fonts.conf
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(DATADIR)/themes $(DESTDIR)$(DATADIR)/highlight $(DESTDIR)$(MANDIR)
+	install -m755 $(NAME) $(DESTDIR)$(PREFIX)/bin/$(NAME)
+	install -m644 data/themes/*.ini $(DESTDIR)$(DATADIR)/themes/
+	install -m644 data/highlight/*.ini $(DESTDIR)$(DATADIR)/highlight/
+	install -m644 data/config.ini.example $(DESTDIR)$(DATADIR)/
+	install -m644 $(BUILD)/fonts.conf $(DESTDIR)$(DATADIR)/fonts.conf
+	install -m644 $(BUILD)/$(NAME).1 $(DESTDIR)$(MANDIR)/$(NAME).1
+
+uninstall:
+	rm -f $(DESTDIR)$(PREFIX)/bin/$(NAME) $(DESTDIR)$(MANDIR)/$(NAME).1
+	rm -rf $(DESTDIR)$(DATADIR)
+else
 install: $(NAME) $(BUILD)/$(APP_ID).desktop $(BUILD)/$(NAME).1
 	install -Dm755 $(NAME) $(DESTDIR)$(PREFIX)/bin/$(NAME)
 	install -d $(DESTDIR)$(DATADIR)/themes $(DESTDIR)$(DATADIR)/highlight
@@ -241,6 +258,7 @@ uninstall:
 	rm -f $(DESTDIR)$(ICONDIR)/scalable/apps/$(APP_ID).svg
 	rm -f $(DESTDIR)$(ICONDIR)/symbolic/apps/$(APP_ID)-symbolic.svg
 	$(if $(DESTDIR),,-gtk-update-icon-cache -qtf $(ICONDIR))
+endif
 
 # macOS: a self-contained, ad-hoc signed .app bundle and a .dmg holding it.
 APP_BUNDLE := $(BUILD)/$(DISPLAY_NAME).app
@@ -258,6 +276,14 @@ $(BUILD)/fonts.conf: data/macos/fonts.conf.in Makefile
 
 app: $(NAME) $(BUILD)/Info.plist $(BUILD)/fonts.conf
 	packaging/macos/make-app.sh $(NAME) "$(APP_BUNDLE)" $(BUILD)/Info.plist $(BUILD)/fonts.conf
+
+# A thin .app in APP_DIR for a package manager (Homebrew) that already provides
+# the libraries: nothing is copied in, and data comes from $(DATADIR) via
+# `make install`. APP_DIR=$(PREFIX) puts it next to bin/.
+APP_DIR ?= $(PREFIX)
+app-unbundled: $(NAME) $(BUILD)/Info.plist $(BUILD)/fonts.conf
+	packaging/macos/make-app.sh --unbundled $(NAME) "$(DESTDIR)$(APP_DIR)/$(DISPLAY_NAME).app" $(BUILD)/Info.plist \
+	    $(BUILD)/fonts.conf
 
 dmg: app
 	rm -f $(DMG)

@@ -102,11 +102,23 @@ Differences from Linux:
 ### macOS
 
 macOS 14 Sonoma or newer on Apple Silicon (every M1, M2, M3, M4 and M5 Mac), or macOS 15
-Sequoia or newer on Intel. The disk images are built on GitHub's macOS runners (the
-repository is mirrored there from GitLab): `feterm-X.Y.Z-macos-arm64.dmg` and
-`feterm-X.Y.Z-macos-x86_64.dmg`. Open the image and drag **FeTerm** to Applications.
+Sequoia or newer on Intel.
 
-The app is not signed with an Apple Developer ID yet, so macOS blocks the first launch.
+**With Homebrew** (recommended: no Gatekeeper prompt, updates with `brew upgrade`):
+
+```
+brew install faheeme/tap/feterm
+ln -sf "$(brew --prefix)/opt/feterm/FeTerm.app" /Applications/FeTerm.app   # optional: Launchpad and Dock
+```
+
+`feterm` also runs from any terminal. The formula lives in
+[faheeme/homebrew-tap](https://github.com/faheeme/homebrew-tap).
+
+**Or download a disk image** from the [releases page](https://gitlab.com/faheeme/feterm/-/releases):
+`feterm-X.Y.Z-macos-arm64.dmg` (Apple Silicon) or `feterm-X.Y.Z-macos-x86_64.dmg` (Intel).
+Open the image and drag **FeTerm** to Applications.
+
+The disk image is not signed with an Apple Developer ID yet, so macOS blocks the first launch.
 On macOS 15 and newer: open FeTerm once, dismiss the warning, then go to **System
 Settings → Privacy & Security** and choose **Open Anyway** (on macOS 14, right-click the
 app and choose **Open**). Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/FeTerm.app`.

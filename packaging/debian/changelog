@@ -1,3 +1,12 @@
+feterm (0.5.2-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: adds a macOS port (Apple Silicon and Intel) with
+    Cmd shortcuts. On Linux: the pty master is made non-blocking before
+    fork, shortcut hints follow the configured keys, and [keys] accepts
+    cmd/option as modifier names. No other change on Linux.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Tue, 27 Oct 2026 18:59:14 +0200
+
 feterm (0.5.1-1~ppa1) resolute; urgency=medium
 
   * Security release: harden against malicious SSH/SFTP servers and hostile
