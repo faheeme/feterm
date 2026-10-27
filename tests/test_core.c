@@ -379,6 +379,13 @@ static void test_keys(void)
         CHECK(p[len - 7] == '\r');
         TE_FREE(p);
     }
+    /* C1 controls (here U+009B CSI, UTF-8 0xC2 0x9B) are stripped when sanitising. */
+    char *pc = keys_prepare_paste("a\xC2\x9B" "b", false, true, &len);
+    CHECK(pc != nullptr);
+    if (pc != nullptr) {
+        CHECK(len == 2 && memcmp(pc, "ab", 2) == 0);
+        TE_FREE(pc);
+    }
 }
 
 typedef struct { int n; bool saw_regex; bool saw_quoted; } ini_ctx;
@@ -893,6 +900,27 @@ static void test_osc8_and_abs(void)
     CHECK(term_find_prompt(t, p, -1, &p));
     abs_text(t, p, buf, sizeof buf);
     CHECK(strcmp(buf, "$ one") == 0);
+
+    /* CAN (0x18) cancels an in-progress OSC instead of dispatching it. */
+    feed(t, "\x1b]0;good\x1b\\");
+    CHECK(strcmp(term_title(t), "good") == 0);
+    feed(t, "\x1b]0;canceled\x18");
+    CHECK(strcmp(term_title(t), "good") == 0);
+
+    /* OSC 7: only this host's cwd is honoured; another host's is ignored. */
+    feed(t, "\x1b]7;file://localhost/tmp/here\x1b\\");
+    CHECK(strcmp(term_cwd(t), "/tmp/here") == 0);
+    feed(t, "\x1b]7;file://evil.example.com/tmp/pwned\x1b\\");
+    CHECK(strcmp(term_cwd(t), "/tmp/here") == 0);
+    feed(t, "\x1b]7;file://localhost/bad%01path\x1b\\");   /* percent-encoded control byte: rejected */
+    CHECK(strcmp(term_cwd(t), "/tmp/here") == 0);
+
+    /* RIS (ESC c) frees the hyperlink table; a fresh link still works afterwards. */
+    feed(t, "\x1b""c");
+    feed(t, "\x1b]8;;https://y/z\x07K\x1b]8;;\x07");
+    const te_line *lr = term_abs_line(t, term_view_abs(t, 0));
+    CHECK(lr != nullptr && lr->cells[0].link != 0 &&
+          strcmp(term_link_uri(t, lr->cells[0].link), "https://y/z") == 0);
     term_destroy(&t);
 }
 

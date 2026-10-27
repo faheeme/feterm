@@ -462,6 +462,20 @@ static void test_ui_widgets(void)
     CHECK(!quick_parse(TE_SESS_SSH, "host:99999", &q));
     CHECK(!quick_parse(TE_SESS_SERIAL, "/etc/passwd", &q));
     CHECK(!quick_parse(TE_SESS_SSH, "", &q));
+
+    /* Jump hosts: every comma-separated hop is validated, not just the first. */
+    te_session jt;
+    session_defaults(&jt, TE_SESS_SSH);
+    (void)str_copy(jt.name, sizeof jt.name, "jumpy");
+    (void)str_copy(jt.host, sizeof jt.host, "10.0.0.1");
+    (void)str_copy(jt.jump, sizeof jt.jump, "bastion,hop2.example.net");
+    CHECK(session_validate(&jt, nullptr));
+    (void)str_copy(jt.jump, sizeof jt.jump, "bastion,-oProxyCommand=x");
+    CHECK(!session_validate(&jt, nullptr));   /* a hop starting with '-' is rejected */
+    (void)str_copy(jt.jump, sizeof jt.jump, "bastion,");
+    CHECK(!session_validate(&jt, nullptr));   /* empty trailing hop rejected */
+    (void)str_copy(jt.jump, sizeof jt.jump, "");
+    CHECK(session_validate(&jt, nullptr));    /* no jump host is fine */
 }
 
 /* Right-click only opens a menu; Delete only asks; nothing changes until confirmed. */

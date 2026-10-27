@@ -249,10 +249,17 @@ static bool jump_valid(const char *j)
     if (j[0] == '\0') {
         return true;
     }
-    if (j[0] == '-' || strnlen(j, TE_SESS_HOST_MAX + 1) > TE_SESS_HOST_MAX) {
+    if (strnlen(j, TE_SESS_HOST_MAX + 1) > TE_SESS_HOST_MAX) {
         return false;
     }
+    /* -J is a comma-separated list of hops; ssh turns it into a ProxyCommand that
+     * runs via /bin/sh. Each hop must be a real host, so no segment may be empty or
+     * start with '-' (which would smuggle an ssh option into the proxy command). */
     for (const char *s = j; *s != '\0'; s++) {
+        bool at_segment_start = s == j || s[-1] == ',';
+        if (at_segment_start && (*s == '-' || *s == ',')) {
+            return false;
+        }
         unsigned char c = (unsigned char)*s;
         bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
                   c == '-' || c == '_' || c == ':' || c == '@' || c == ',' || c == '[' || c == ']' || c == '%';
@@ -260,7 +267,7 @@ static bool jump_valid(const char *j)
             return false;
         }
     }
-    return true;
+    return j[strlen(j) - 1] != ',';   /* no empty trailing segment */
 }
 
 bool session_validate(const te_session *s, const char **why)

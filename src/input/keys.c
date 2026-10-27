@@ -323,6 +323,13 @@ char *keys_prepare_paste(const char *text, bool bracketed, bool sanitize, size_t
         if (sanitize && ((c < 0x20 && c != '\t' && c != '\r') || c == 0x7f)) {
             continue;
         }
+        /* C1 controls (U+0080..U+009F) are CSI/OSC introducers too; a terminal in
+         * 8-bit mode would act on them. They arrive as UTF-8 0xC2 0x80..0x9F. */
+        if (sanitize && c == 0xC2 && i + 1 < in && (unsigned char)text[i + 1] >= 0x80 &&
+            (unsigned char)text[i + 1] <= 0x9F) {
+            i++;
+            continue;
+        }
         out[o++] = (char)c;
     }
     if (bracketed) {
