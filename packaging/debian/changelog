@@ -1,3 +1,13 @@
+feterm (0.5.1-1~ppa1) resolute; urgency=medium
+
+  * Security release: harden against malicious SSH/SFTP servers and hostile
+    terminal output. "Edit locally" no longer runs server-named executables,
+    file:// links are restricted to local paths, ssh usernames are validated,
+    sixel decoding is CPU-bounded, and OSC 7 / paste / parser handling is
+    tightened. No user-visible behaviour change in normal use.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Tue, 27 Oct 2026 14:56:07 +0200
+
 feterm (0.5.0-1~ppa1) resolute; urgency=medium
 
   * New upstream release: adds a Windows port. Nothing changes on Linux

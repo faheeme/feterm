@@ -1,5 +1,5 @@
 Name:           feterm
-Version:        0.5.0
+Version:        0.5.1
 Release:        1%{?dist}
 Summary:        Modern terminal emulator with network-device syntax highlighting
 License:        MIT
@@ -42,6 +42,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.gitlab.faheeme.%{n
 %{_datadir}/icons/hicolor/*/apps/io.gitlab.faheeme.%{name}*
 
 %changelog
+* Tue Oct 27 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.1-1
+- Security release: harden against malicious servers and hostile terminal output
+
 * Tue Oct 27 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.0-1
 - New upstream release: Windows port; Linux behaviour unchanged
 
