@@ -76,7 +76,11 @@ static void set_keepalive(int fd, int idle)
     int intvl = idle / 3 > 5 ? idle / 3 : 5;
     int cnt = 9;
     (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
+#ifdef __APPLE__
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof idle);   /* macOS's name for TCP_KEEPIDLE */
+#else
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
+#endif
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof cnt);
     (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof on);
