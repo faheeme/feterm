@@ -1,6 +1,6 @@
 # Maintainer: Faheem Essack <faheem dot essack at gmail dot com>
 pkgname=feterm
-pkgver=0.5.1
+pkgver=0.5.2
 pkgrel=1
 pkgdesc="Modern terminal emulator with PCRE2 syntax highlighting for Cisco, Arista and Juniper"
 arch=('x86_64' 'aarch64')
