@@ -228,12 +228,20 @@ bool url_is_openable(const char *uri)
     }
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)uri[i];
-        if (c < 0x21 || c > 0x7E) {
+        /* Printable ASCII only; a backslash never belongs in a URL and would let
+         * a "file://" target become a Windows/UNC path (file://\\host\share\x.exe). */
+        if (c < 0x21 || c > 0x7E || c == '\\') {
             return false;
         }
     }
     for (size_t i = 0; i < TE_ARRAY_LEN(schemes); i++) {
         if (strncasecmp(uri, schemes[i], strlen(schemes[i])) == 0) {
+            /* A file:// link must be local (empty host): file:///path. Reject
+             * file://host/... — on Windows that is a UNC path to a remote
+             * program, which ShellExecute would happily run. */
+            if (strcasecmp(schemes[i], "file://") == 0 && uri[strlen("file://")] != '/') {
+                return false;
+            }
             return true;
         }
     }

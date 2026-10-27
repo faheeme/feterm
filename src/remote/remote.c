@@ -20,6 +20,7 @@
 #include "util/mem.h"
 #include "util/os.h"
 #include "util/str.h"
+#include "util/utf8.h"
 
 #define MAX_PENDING   64
 #define PIPELINE      16
@@ -166,24 +167,65 @@ te_err remote_join(const char *dir, const char *name, char *out, size_t outsz)
     return str_fmt(out, outsz, "%s%s%s", dir, dir[dl - 1] == '/' ? "" : "/", name);
 }
 
+/* Invisible formatting code points that let a server disguise a file name, e.g.
+ * a right-to-left override so "invoice<RLO>fdp.exe" is shown as "invoiceexe.fdp".
+ * None of them belong in a file name, so they are dropped entirely. */
+static bool cp_is_name_hazard(uint32_t cp)
+{
+    return cp == 0x061Cu ||                        /* Arabic letter mark          */
+           (cp >= 0x200Bu && cp <= 0x200Fu) ||     /* zero-width spaces, LRM, RLM */
+           (cp >= 0x202Au && cp <= 0x202Eu) ||     /* bidi embeddings / overrides */
+           (cp >= 0x2060u && cp <= 0x2064u) ||     /* word joiner, invisible ops  */
+           (cp >= 0x2066u && cp <= 0x2069u) ||     /* bidi isolates               */
+           cp == 0xFEFFu;                          /* BOM / zero-width no-break    */
+}
+
 bool remote_local_name(const char *remote_name, char *out, size_t outsz)
 {
     if (remote_name == nullptr || outsz == 0) {
         return false;
     }
     size_t k = 0;
-    for (const char *s = remote_name; *s != '\0' && k + 1 < outsz; s++) {
-        unsigned char c = (unsigned char)*s;
-        if (c < 0x20 || c == 0x7F) {
-            continue;   /* control characters never reach a local file name */
+    /* Decode UTF-8 so hazardous code points can be filtered by value, not by byte:
+     * a disguised extension must never survive into a name we later hand to the
+     * desktop "open" handler. Invalid bytes and C0/C1/DEL controls are dropped. */
+    te_utf8_dec dec = { 0 };
+    const unsigned char *s = (const unsigned char *)remote_name;
+    for (size_t i = 0; s[i] != '\0' && k + 1 < outsz;) {
+        uint32_t cp = 0;
+        te_utf8_res r = utf8_feed(&dec, s[i], &cp);
+        if (r == TE_UTF8_DONE) {
+            i++;
+        } else if (r == TE_UTF8_ERROR) {
+            i++;        /* consume and drop the bad byte */
+            continue;
+        } else if (r == TE_UTF8_ERROR_REPROCESS) {
+            continue;   /* re-feed s[i] as the start of a fresh sequence */
+        } else {        /* TE_UTF8_MORE */
+            i++;
+            continue;
+        }
+        if (cp < 0x20u || cp == 0x7Fu || (cp >= 0x80u && cp <= 0x9Fu)) {
+            continue;   /* C0 / DEL / C1 controls never reach a local file name */
+        }
+        if (cp_is_name_hazard(cp)) {
+            continue;
+        }
+        uint32_t ec = cp;
+        if (cp == (uint32_t)'/' || cp == (uint32_t)'\\') {
+            ec = (uint32_t)'_';
         }
 #ifdef _WIN32
         /* Windows also refuses these; "a:b" would even name a hidden stream of file "a". */
-        bool bad = c == '/' || c == '\\' || strchr(":*?\"<>|", c) != nullptr;
-#else
-        bool bad = c == '/' || c == '\\';
+        else if (cp < 0x80u && strchr(":*?\"<>|", (int)cp) != nullptr) {
+            ec = (uint32_t)'_';
+        }
 #endif
-        out[k++] = bad ? '_' : (char)c;
+        size_t w = utf8_encode(ec, out + k, outsz - 1 - k);
+        if (w == 0) {
+            break;
+        }
+        k += w;
     }
     out[k] = '\0';
 #ifdef _WIN32
@@ -1142,6 +1184,7 @@ static void transfer_closed(te_remote *r, bool ok, const char *msg)
         const char *slash = strrchr(x->local, '/');
         if (slash != nullptr) {
             (void)str_fmt(done_path, sizeof done_path, "%.*s/%s", (int)(slash - x->local), x->local, r->xfinal);
+            os_mark_from_internet(done_path);   /* it came from a remote host: tag it untrusted */
         }
         bool edit = x->edit;
         char remote_copy[TE_REMOTE_PATH_MAX] = { 0 };

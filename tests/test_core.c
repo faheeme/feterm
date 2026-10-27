@@ -1014,6 +1014,11 @@ static void test_urls(void)
     CHECK(!url_is_openable("javascript:alert(1)"));
     CHECK(!url_is_openable("https://a.b/\x1b[31m"));
     CHECK(!url_is_openable("http://a b"));
+    CHECK(url_is_openable("file:///etc/hosts"));              /* local file:// is fine */
+    CHECK(!url_is_openable("file://host/share/x.exe"));       /* UNC / remote host rejected */
+    CHECK(!url_is_openable("file://server/x"));               /* non-empty host rejected */
+    CHECK(!url_is_openable("file://"));                       /* nothing to open */
+    CHECK(!url_is_openable("https://a.b/\\\\host\\share"));   /* backslash rejected */
     term_destroy(&t);
     url_destroy(&u);
     CHECK(u == nullptr);

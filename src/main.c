@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -938,6 +939,31 @@ static void host_r_prompt(void *user, te_remote *r, te_prompt_kind kind, const c
     a->need_render = true;
 }
 
+/* Extensions the desktop "open" handler would run rather than edit. A download
+ * is named by the (untrusted) remote server, so we never hand one of these to the
+ * default handler; the user must point [files] editor at a real editor first. */
+static bool path_is_executable_type(const char *path)
+{
+    const char *slash = strrchr(path, '/');
+    const char *base = slash != nullptr ? slash + 1 : path;
+    const char *dot = strrchr(base, '.');
+    if (dot == nullptr || dot[1] == '\0') {
+        return false;
+    }
+    static const char *const ext[] = {
+        "exe", "com", "bat", "cmd", "scr", "pif", "msi", "msp", "cpl", "hta", "jar",
+        "js",  "jse", "vbs", "vbe", "wsf", "wsh", "ps1", "psm1", "lnk", "url", "reg",
+        "inf", "scf", "msc", "sct", "desktop", "application", "appref-ms", "gadget",
+        "dll", "so",  "dylib", "run",
+    };
+    for (size_t i = 0; i < TE_ARRAY_LEN(ext); i++) {
+        if (strcasecmp(dot + 1, ext[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Open a downloaded copy in the user's editor (or the desktop default), without a shell. */
 static void host_r_edit_open(void *user, const char *path)
 {
@@ -950,6 +976,13 @@ static void host_r_edit_open(void *user, const char *path)
         for (char *tok = strtok_r(buf, " ", &save); tok != nullptr && n < 8; tok = strtok_r(nullptr, " ", &save)) {
             argv[n++] = tok;
         }
+    }
+    /* With no editor configured we fall back to the desktop "open" handler, which
+     * would *execute* a program or script. Refuse rather than run a file the remote
+     * side chose its name for (e.g. a disguised .exe/.desktop). */
+    if (n == 0 && path_is_executable_type(path)) {
+        show_toast(a, "Not opening an executable file; set [files] editor in config.ini to edit it");
+        return;
     }
     if (n == 0) {
         argv[n++] = "xdg-open";
@@ -1604,8 +1637,20 @@ static void update_hover(app *a, te_pane *p, float px, float py, uint32_t mods)
     bool want = p != nullptr && (mods & TE_MOD_CTRL) != 0 && a->urls != nullptr &&
                 pixel_to_cell(a, p, px, py, &col, &row);
     bool had = a->hover_valid;
+    char prev[TE_MAX_URI + 1] = { 0 };
+    if (had) {
+        (void)str_copy(prev, sizeof prev, a->hover.uri);
+    }
     a->hover_valid = want && url_at(a->urls, p->term, term_view_abs(p->term, row), col, &a->hover);
     a->hover_pane = a->hover_valid ? p : nullptr;
+    /* Show the real destination before the click: an OSC 8 hyperlink can display
+     * any text while pointing somewhere else, so the link text is not trustworthy. */
+    if (a->hover_valid && strcmp(prev, a->hover.uri) != 0) {
+        char msg[128] = { 0 };
+        bool cut = strnlen(a->hover.uri, sizeof a->hover.uri) > 96;
+        (void)str_fmt(msg, sizeof msg, "%.96s%s  —  Ctrl+click to open", a->hover.uri, cut ? "..." : "");
+        show_toast(a, msg);
+    }
     te_pointer ptr = a->hover_valid ? TE_POINTER_HAND : TE_POINTER_TEXT;
     if (layout_divider_at(&a->layout, (int)px, (int)py, DIVIDER_SLOP) != nullptr || py < (float)tab_bar_height(a)) {
         ptr = TE_POINTER_DEFAULT;
