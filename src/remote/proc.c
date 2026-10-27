@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "util/log.h"
+#include "util/os.h"
 #include "util/str.h"
 
 static char spawn_error[200];
@@ -35,12 +36,6 @@ static void close_fd(int *fd)
         close(*fd);
         *fd = -1;
     }
-}
-
-static bool set_nonblock(int fd)
-{
-    int fl = fcntl(fd, F_GETFL);
-    return fl >= 0 && fcntl(fd, F_SETFL, fl | O_NONBLOCK) == 0;
 }
 
 /*
@@ -96,6 +91,10 @@ te_err proc_spawn(te_proc *p, const char *const argv[])
         goto fail;
     }
     slave[sizeof slave - 1] = '\0';
+    /* The parent's ends, before fork (see os_set_nonblock). */
+    if (!os_set_nonblock(in_pipe[1]) || !os_set_nonblock(out_pipe[0]) || !os_set_nonblock(master)) {
+        goto fail;
+    }
     struct winsize ws = { .ws_row = 24, .ws_col = 120 };
     (void)ioctl(master, TIOCSWINSZ, &ws);
     pid_t pid = fork();
@@ -112,10 +111,6 @@ te_err proc_spawn(te_proc *p, const char *const argv[])
     p->in_fd = in_pipe[1];
     p->out_fd = out_pipe[0];
     p->tty_fd = master;
-    if (!set_nonblock(p->in_fd) || !set_nonblock(p->out_fd) || !set_nonblock(p->tty_fd)) {
-        proc_stop(p);
-        return TE_ERR_SYS;
-    }
     return TE_OK;
 
 fail:

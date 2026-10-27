@@ -14,6 +14,7 @@
 
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/os.h"
 #include "util/str.h"
 
 extern char **environ;
@@ -214,6 +215,13 @@ te_err pty_spawn(te_pty *p, const te_pty_opts *o)
         argv = (char *const *)(uintptr_t)shell_argv;
     }
 
+    /* Before fork: only the parent uses the master (see os_set_nonblock). */
+    if (!os_set_nonblock(fd)) {
+        LOG_E("fcntl O_NONBLOCK: %s", strerror(errno));
+        rc = TE_ERR_SYS;
+        goto fail;
+    }
+
     struct winsize ws = { .ws_row = o->rows, .ws_col = o->cols, .ws_xpixel = o->px_w, .ws_ypixel = o->px_h };
     pid_t pid = fork();
     if (pid < 0) {
@@ -228,14 +236,6 @@ te_err pty_spawn(te_pty *p, const te_pty_opts *o)
 
     free_env(env);
     env = nullptr;
-    int flags = fcntl(fd, F_GETFL);
-    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
-        LOG_E("fcntl O_NONBLOCK: %s", strerror(errno));
-        p->master_fd = fd;
-        p->child = pid;
-        pty_destroy(p);
-        return TE_ERR_SYS;
-    }
     p->master_fd = fd;
     p->child = pid;
     return TE_OK;

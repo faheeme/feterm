@@ -42,6 +42,16 @@ void os_harden_process(void);
  */
 void os_mark_from_internet(const char *path);
 
+#ifndef _WIN32
+/*
+ * Make fd non-blocking. Set a pty master's flag before fork(): on macOS the
+ * pty driver can refuse it (ENOTTY) while the child is opening the other end.
+ * On macOS an ENOTTY whose flag nonetheless took effect counts as success, as
+ * the kernel records O_NONBLOCK before asking the driver and reads honour it.
+ */
+[[nodiscard]] bool os_set_nonblock(int fd);
+#endif
+
 #ifdef _WIN32
 /* %LOCALAPPDATA%: per-user data that stays on this machine. */
 [[nodiscard]] te_err os_local_data_base(char *out, size_t outsz);

@@ -1,5 +1,7 @@
 #include "util/os.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -114,4 +116,22 @@ bool os_hostname(char *out, size_t outsz)
     }
     out[outsz - 1] = '\0';
     return out[0] != '\0';
+}
+
+bool os_set_nonblock(int fd)
+{
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0) {
+        return false;
+    }
+    if (fcntl(fd, F_SETFL, fl | O_NONBLOCK) == 0) {
+        return true;
+    }
+#ifdef __APPLE__
+    if (errno == ENOTTY) {
+        int now = fcntl(fd, F_GETFL);
+        return now >= 0 && (now & O_NONBLOCK) != 0;
+    }
+#endif
+    return false;
 }
