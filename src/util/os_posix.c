@@ -49,3 +49,26 @@ te_err os_self_exe(char *out, size_t outsz)
     }
     return TE_OK;
 }
+
+void os_mark_from_internet(const char *path)
+{
+    (void)path;   /* Mark-of-the-Web is a Windows concept; nothing to do here */
+}
+
+void os_harden_process(void)
+{
+    /* The DLL/exe search-order planting this guards against is Windows-specific. */
+}
+
+bool os_hostname(char *out, size_t outsz)
+{
+    if (out == nullptr || outsz == 0) {
+        return false;
+    }
+    if (gethostname(out, outsz) != 0) {
+        out[0] = '\0';
+        return false;
+    }
+    out[outsz - 1] = '\0';
+    return out[0] != '\0';
+}

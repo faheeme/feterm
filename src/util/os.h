@@ -22,6 +22,25 @@
 /* Absolute path of the running executable. */
 [[nodiscard]] te_err os_self_exe(char *out, size_t outsz);
 
+/*
+ * Process-wide security hardening, called once at startup. On Windows it drops
+ * the current directory from the DLL and executable search order, so a file
+ * planted beside FeTerm's working directory cannot be loaded or run in place of
+ * a system one (DLL/exe planting). A no-op on POSIX.
+ */
+void os_harden_process(void);
+
+/* This machine's host name (short or FQDN) into out. false if unavailable. */
+[[nodiscard]] bool os_hostname(char *out, size_t outsz);
+
+/*
+ * Tag a file that just arrived from a remote host with the Mark-of-the-Web, so
+ * the OS treats it as untrusted (SmartScreen/zone warnings). Writes a
+ * Zone.Identifier stream on Windows; a no-op on POSIX. Best-effort: failure is
+ * ignored, since it only adds a warning and never blocks the download.
+ */
+void os_mark_from_internet(const char *path);
+
 #ifdef _WIN32
 /* %LOCALAPPDATA%: per-user data that stays on this machine. */
 [[nodiscard]] te_err os_local_data_base(char *out, size_t outsz);
