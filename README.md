@@ -104,7 +104,9 @@ Differences from Linux:
 macOS 14 Sonoma or newer on Apple Silicon (every M1, M2, M3, M4 and M5 Mac), or macOS 15
 Sequoia or newer on Intel.
 
-**With Homebrew** (recommended: no Gatekeeper prompt, updates with `brew upgrade`):
+**With Homebrew** (no Gatekeeper prompt, updates with `brew upgrade`; prebuilt for Apple
+Silicon on macOS 15 and 26, while on macOS 14 and Intel Macs Homebrew builds from source, so
+the disk image below is quicker there):
 
 ```
 brew install faheeme/tap/feterm
