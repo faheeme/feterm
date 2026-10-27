@@ -43,7 +43,7 @@ jobs:
           xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
           sudo xcode-select -s "$xcode"
           echo "using $xcode"
-          brew install llvm sdl3 pcre2 freetype fontconfig pkgconf dylibbundler
+          brew install llvm lld sdl3 pcre2 freetype fontconfig pkgconf dylibbundler
           # Apple's clang lags upstream; C23 (<stdckdint.h>, nullptr) and libFuzzer need Homebrew's.
           echo "CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
           echo "FUZZ_CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
@@ -58,7 +58,8 @@ jobs:
         run: make test
 
       - name: Fuzz the parsers (20 s each)
-        run: make fuzz FUZZ_TIME=20
+        # The fuzzers are never shipped; lld links them on runners whose Xcode ld is too old for LLVM's objects.
+        run: make fuzz FUZZ_TIME=20 FUZZ_LDFLAGS=-fuse-ld=lld
 
       - name: Terminal end to end (pty, shell, exit)
         run: |

@@ -171,6 +171,8 @@ $(BUILD)/render_snapshot$(EXE): tests/render_snapshot.c $(BUILD)/libapp.a
 # FUZZ_TIME can be overridden. The sources are the unit-test set minus test_core.c.
 FUZZ_CC   ?= clang
 FUZZ_TIME ?= 30
+# Extra link flags, e.g. -fuse-ld=lld when the system linker is older than FUZZ_CC.
+FUZZ_LDFLAGS ?=
 FUZZ_SRC  := $(filter-out tests/test_core.c,$(TEST_SRC))
 FUZZ_NAMES := term sftp unescape sixel ini
 FUZZ_BINS  := $(addprefix $(BUILD)/fuzz_,$(FUZZ_NAMES))
@@ -184,7 +186,7 @@ $(BUILD)/fuzz_ini:      FUZZ_N := 5
 
 $(FUZZ_BINS): $(BUILD)/fuzz_%: tests/fuzz.c $(FUZZ_SRC) $(wildcard tests/*.inc) $(GEN)/app_name.h
 	@mkdir -p $(@D)
-	$(FUZZ_CC) $(CPPFLAGS) -std=c23 -Wno-missing-prototypes -g -O1 -DFUZZ_TARGET=$(FUZZ_N) $(FUZZ_SAN) \
+	$(FUZZ_CC) $(CPPFLAGS) -std=c23 -Wno-missing-prototypes -g -O1 -DFUZZ_TARGET=$(FUZZ_N) $(FUZZ_SAN) $(FUZZ_LDFLAGS) \
 	    $(shell $(PKG_CONFIG) --cflags libpcre2-8) tests/fuzz.c $(FUZZ_SRC) -o $@ \
 	    $(shell $(PKG_CONFIG) --libs libpcre2-8) -lm
 
