@@ -125,10 +125,11 @@ jobs:
           pattern: feterm-macos-*
           merge-multiple: true
       - name: GitHub release with the disk images
+        # The artifacts keep their build/ folder, so the images are found, not globbed at the top.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
              --title "FeTerm ${GITHUB_REF_NAME#v} (macOS)" \
              --notes "macOS builds of ${GITHUB_REF_NAME}. Source, notes and other platforms: https://gitlab.com/faheeme/feterm/-/releases/${GITHUB_REF_NAME}" \
-             ./*.dmg
+             $(find . -name '*.dmg')
