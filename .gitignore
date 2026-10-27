@@ -7,6 +7,16 @@
 /feterm.exe
 /feterm-helper.exe
 /dist/
+/ppa-out/
+
+# Editors and operating systems
+*.swp
+*~
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
 
 # Local helper scripts (icon generator); not part of the project
 /tools/

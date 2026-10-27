@@ -1,7 +1,7 @@
 /*
  * The welcome banner a new local shell starts with:
  *
- *   [logo]  FeTerm v0.4.3
+ *   [logo]  FeTerm v0.5.0
  *   [logo]  © Author - email
  *
  *   prompt

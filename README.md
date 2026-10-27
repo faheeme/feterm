@@ -1,6 +1,7 @@
 # FeTerm
 
-A GPU-accelerated terminal emulator in C23 that runs natively on Wayland and X11 through SDL3.
+A GPU-accelerated terminal emulator in C23 that runs natively on Wayland and X11 through SDL3,
+and on Windows 10 (1809) and 11.
 The name lives in two Makefile variables: `NAME` (binary, config and data directory, app-id)
 and `DISPLAY_NAME` (window title, `--version`, `TERM_PROGRAM`).
 
@@ -63,6 +64,30 @@ sudo add-apt-repository --remove ppa:faheeme/feterm
 
 Build it from source as described below.
 
+### Windows
+
+Windows 10 (version 1809 or newer) and 11, x64. Download from the
+[releases page](https://gitlab.com/faheeme/feterm/-/releases):
+
+- `feterm-X.Y.Z-windows-x64-setup.exe`: an installer (per user without admin rights, or
+  for all users) with a Start-menu entry and, optionally, "Open FeTerm here" on folders.
+- `feterm-X.Y.Z-windows-x64.zip`: portable. Unzip anywhere and run `feterm.exe`.
+
+The files are not code-signed yet, so SmartScreen may warn the first time: choose
+**More info → Run anyway**. Settings and sessions live in `%APPDATA%\feterm`.
+
+SSH sessions and the Files tab use the OpenSSH client that comes with Windows. If `ssh -V`
+says "not recognized", add it under **Settings → System → Optional features → OpenSSH
+Client**. Telnet and serial sessions need nothing extra.
+
+Differences from Linux:
+- **The Files tab asks for the password a second time.** Windows' OpenSSH can't share one
+  login between connections (no ControlMaster), so the Files tab logs in separately. With
+  SSH keys and the agent (the "OpenSSH Authentication Agent" service, then `ssh-add`) neither
+  login asks.
+- `ssh` typed by hand in a PowerShell or cmd tab doesn't open the Files tab (the same as on
+  Linux). Use a session or Quick Connect.
+
 ## Build
 
 Fedora:
@@ -102,6 +127,9 @@ The window's app-id matches the launcher's name, so docks and task switchers sho
 on Wayland and X11.
 
 Run from the source tree with `./feterm`: themes are found in `./data` next to the binary.
+
+The Windows build is cross-compiled on Linux in Docker: `packaging/windows/build.sh` (see
+`packaging/README.md`).
 
 Warnings are errors by default. `make WERROR=` turns that off, for example when a newer
 compiler adds a warning. The distribution packages in `packaging/` (AUR, COPR, PPA) build
@@ -200,7 +228,8 @@ can back them up, sync them, or edit them by hand.
 
 The Files tab (Ctrl+Shift+2) browses the focused SSH session's server over SFTP.
 - **Logging in:** it reuses the terminal's login, so there's no second password. If it can't,
-  it asks in a dialog; the answer goes straight to ssh and is wiped from memory.
+  it asks in a dialog; the answer goes straight to ssh and is wiped from memory. On Windows
+  it always logs in separately, so password logins are asked twice (see *Windows* above).
 - **Right-click:** opens a menu and never acts by itself.
   - On a file: Download, Download to..., Edit locally, Rename, Copy path, Permissions,
     Properties and Delete.

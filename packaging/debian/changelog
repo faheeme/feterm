@@ -1,3 +1,10 @@
+feterm (0.5.0-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: adds a Windows port. Nothing changes on Linux
+    apart from internal restructuring of the file-transfer code.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Tue, 27 Oct 2026 10:33:40 +0200
+
 feterm (0.4.3-1~ppa1) resolute; urgency=medium
 
   * New upstream release: zooming no longer resizes the sidebar, menus
