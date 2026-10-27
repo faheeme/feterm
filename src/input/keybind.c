@@ -77,6 +77,67 @@ static void bind(te_keymap *m, te_action a, size_t slot, te_key key, uint32_t cp
     m->b[a][slot] = (te_keybind){ .key = key, .cp = cp, .mods = mods };
 }
 
+#ifdef __APPLE__
+/*
+ * macOS: Cmd shortcuts in the style of Terminal.app and iTerm2. Ctrl and
+ * Ctrl+Shift combinations all go to the shell, as Mac users expect; Option is
+ * left free for typing characters (# @ € é on many layouts).
+ */
+void keymap_defaults(te_keymap *m)
+{
+    const uint32_t cmd = TE_MOD_SUPER;
+    const uint32_t cs = TE_MOD_SUPER | TE_MOD_SHIFT;
+    const uint32_t co = TE_MOD_SUPER | TE_MOD_ALT;
+    const uint32_t cc = TE_MOD_SUPER | TE_MOD_CTRL;
+    memset(m, 0, sizeof *m);
+    bind(m, TE_ACT_COPY, 0, TE_KEY_CHAR, 'c', cmd);
+    bind(m, TE_ACT_PASTE, 0, TE_KEY_CHAR, 'v', cmd);
+    /* paste_primary: macOS has no primary selection; left unbound */
+    bind(m, TE_ACT_ZOOM_IN, 0, TE_KEY_CHAR, '=', cmd);
+    bind(m, TE_ACT_ZOOM_IN, 1, TE_KEY_CHAR, '+', cmd);
+    bind(m, TE_ACT_ZOOM_OUT, 0, TE_KEY_CHAR, '-', cmd);
+    bind(m, TE_ACT_ZOOM_RESET, 0, TE_KEY_CHAR, '0', cmd);
+    bind(m, TE_ACT_SCROLL_PAGE_UP, 0, TE_KEY_PAGE_UP, 0, TE_MOD_SHIFT);
+    bind(m, TE_ACT_SCROLL_PAGE_DOWN, 0, TE_KEY_PAGE_DOWN, 0, TE_MOD_SHIFT);
+    bind(m, TE_ACT_SCROLL_LINE_UP, 0, TE_KEY_UP, 0, co);
+    bind(m, TE_ACT_SCROLL_LINE_DOWN, 0, TE_KEY_DOWN, 0, co);
+    bind(m, TE_ACT_SCROLL_TOP, 0, TE_KEY_HOME, 0, cmd);
+    bind(m, TE_ACT_SCROLL_TOP, 1, TE_KEY_HOME, 0, TE_MOD_SHIFT);
+    bind(m, TE_ACT_SCROLL_BOTTOM, 0, TE_KEY_END, 0, cmd);
+    bind(m, TE_ACT_SCROLL_BOTTOM, 1, TE_KEY_END, 0, TE_MOD_SHIFT);
+    bind(m, TE_ACT_SEARCH, 0, TE_KEY_CHAR, 'f', cmd);
+    bind(m, TE_ACT_HIGHLIGHT_CYCLE, 0, TE_KEY_CHAR, 'h', cs);
+    bind(m, TE_ACT_RELOAD_CONFIG, 0, TE_KEY_CHAR, 'r', cs);
+    bind(m, TE_ACT_PREV_PROMPT, 0, TE_KEY_UP, 0, cmd);
+    bind(m, TE_ACT_NEXT_PROMPT, 0, TE_KEY_DOWN, 0, cmd);
+    bind(m, TE_ACT_NEW_TAB, 0, TE_KEY_CHAR, 't', cmd);
+    bind(m, TE_ACT_CLOSE_PANE, 0, TE_KEY_CHAR, 'w', cmd);
+    bind(m, TE_ACT_NEXT_TAB, 0, TE_KEY_CHAR, ']', cs);
+    bind(m, TE_ACT_NEXT_TAB, 1, TE_KEY_TAB, 0, TE_MOD_CTRL);
+    bind(m, TE_ACT_PREV_TAB, 0, TE_KEY_CHAR, '[', cs);
+    bind(m, TE_ACT_PREV_TAB, 1, TE_KEY_TAB, 0, TE_MOD_CTRL | TE_MOD_SHIFT);
+    for (uint32_t i = 0; i < 9; i++) {
+        bind(m, (te_action)(TE_ACT_GOTO_TAB_1 + i), 0, TE_KEY_CHAR, '1' + i, cmd);
+    }
+    bind(m, TE_ACT_SPLIT_RIGHT, 0, TE_KEY_CHAR, 'd', cmd);
+    bind(m, TE_ACT_SPLIT_DOWN, 0, TE_KEY_CHAR, 'd', cs);
+    bind(m, TE_ACT_FOCUS_NEXT_PANE, 0, TE_KEY_CHAR, ']', cmd);
+    bind(m, TE_ACT_FOCUS_PREV_PANE, 0, TE_KEY_CHAR, '[', cmd);
+    bind(m, TE_ACT_RESIZE_LEFT, 0, TE_KEY_LEFT, 0, cc);
+    bind(m, TE_ACT_RESIZE_RIGHT, 0, TE_KEY_RIGHT, 0, cc);
+    bind(m, TE_ACT_RESIZE_UP, 0, TE_KEY_UP, 0, cc);
+    bind(m, TE_ACT_RESIZE_DOWN, 0, TE_KEY_DOWN, 0, cc);
+    bind(m, TE_ACT_TOGGLE_ZOOM, 0, TE_KEY_ENTER, 0, cs);
+    bind(m, TE_ACT_THEME_NEXT, 0, TE_KEY_CHAR, '.', cs);
+    bind(m, TE_ACT_TOGGLE_SIDEBAR, 0, TE_KEY_CHAR, 'b', cmd);
+    bind(m, TE_ACT_SIDEBAR_SESSIONS, 0, TE_KEY_CHAR, '1', cs);
+    bind(m, TE_ACT_SIDEBAR_FILES, 0, TE_KEY_CHAR, '2', cs);
+    bind(m, TE_ACT_QUICK_CONNECT, 0, TE_KEY_CHAR, 'n', cs);
+    /* Mac keyboards have no Pause key; Ctrl+Pause still works on one that does. */
+    bind(m, TE_ACT_SEND_BREAK, 0, TE_KEY_CHAR, 'b', co);
+    bind(m, TE_ACT_SEND_BREAK, 1, TE_KEY_PAUSE, 0, TE_MOD_CTRL);
+}
+#else
 void keymap_defaults(te_keymap *m)
 {
     const uint32_t cs = TE_MOD_CTRL | TE_MOD_SHIFT;
@@ -125,6 +186,24 @@ void keymap_defaults(te_keymap *m)
     bind(m, TE_ACT_SEND_BREAK, 0, TE_KEY_PAUSE, 0, cs);
     bind(m, TE_ACT_SEND_BREAK, 1, TE_KEY_PAUSE, 0, TE_MOD_CTRL);
 }
+#endif
+
+/* A modifier name: ctrl, shift, alt, super and their Mac spellings. 0 if none. */
+static uint32_t mod_bit(const char *name)
+{
+    static const struct { const char *name; uint32_t bit; } mods[] = {
+        { "ctrl", TE_MOD_CTRL }, { "control", TE_MOD_CTRL }, { "shift", TE_MOD_SHIFT },
+        { "alt", TE_MOD_ALT }, { "meta", TE_MOD_ALT }, { "option", TE_MOD_ALT }, { "opt", TE_MOD_ALT },
+        { "super", TE_MOD_SUPER }, { "logo", TE_MOD_SUPER }, { "cmd", TE_MOD_SUPER },
+        { "command", TE_MOD_SUPER },
+    };
+    for (size_t i = 0; i < TE_ARRAY_LEN(mods); i++) {
+        if (strcasecmp(name, mods[i].name) == 0) {
+            return mods[i].bit;
+        }
+    }
+    return 0;
+}
 
 /* Parse one spec like "ctrl+shift+page_up". */
 static bool parse_one(const char *spec, te_keybind *out)
@@ -150,11 +229,9 @@ static bool parse_one(const char *spec, te_keybind *out)
         tok = str_trim(tok);
         if (last != nullptr) {
             /* the previous token was a modifier */
-            if (strcasecmp(last, "ctrl") == 0 || strcasecmp(last, "control") == 0) mods |= TE_MOD_CTRL;
-            else if (strcasecmp(last, "shift") == 0) mods |= TE_MOD_SHIFT;
-            else if (strcasecmp(last, "alt") == 0 || strcasecmp(last, "meta") == 0) mods |= TE_MOD_ALT;
-            else if (strcasecmp(last, "super") == 0 || strcasecmp(last, "logo") == 0) mods |= TE_MOD_SUPER;
-            else return false;
+            uint32_t bit = mod_bit(last);
+            if (bit == 0) return false;
+            mods |= bit;
         }
         last = tok;
     }
@@ -162,11 +239,9 @@ static bool parse_one(const char *spec, te_keybind *out)
     if (plus_key) {
         if (last != nullptr) {
             /* every token was a modifier */
-            if (strcasecmp(last, "ctrl") == 0 || strcasecmp(last, "control") == 0) mods |= TE_MOD_CTRL;
-            else if (strcasecmp(last, "shift") == 0) mods |= TE_MOD_SHIFT;
-            else if (strcasecmp(last, "alt") == 0 || strcasecmp(last, "meta") == 0) mods |= TE_MOD_ALT;
-            else if (strcasecmp(last, "super") == 0 || strcasecmp(last, "logo") == 0) mods |= TE_MOD_SUPER;
-            else return false;
+            uint32_t bit = mod_bit(last);
+            if (bit == 0) return false;
+            mods |= bit;
         }
         kb.key = TE_KEY_CHAR;
         kb.cp = '+';
@@ -248,4 +323,59 @@ te_action keymap_lookup(const te_keymap *m, te_key key, uint32_t cp, uint32_t mo
         }
     }
     return TE_ACT_NONE;
+}
+
+te_err keymap_describe(const te_keymap *m, te_action a, char *out, size_t outsz)
+{
+    if (m == nullptr || out == nullptr || outsz == 0 || a <= TE_ACT_NONE || a >= TE_ACT_COUNT) {
+        return TE_ERR_INVAL;
+    }
+    out[0] = '\0';
+    const te_keybind *kb = &m->b[a][0];
+    if (kb->key == TE_KEY_NONE) {
+        return TE_ERR_NOTFOUND;
+    }
+#ifdef __APPLE__
+    static const char *const mod_names[] = { "Ctrl+", "Option+", "Shift+", "Cmd+" };
+#else
+    static const char *const mod_names[] = { "Ctrl+", "Alt+", "Shift+", "Super+" };
+#endif
+    static const uint32_t mod_order[] = { TE_MOD_CTRL, TE_MOD_ALT, TE_MOD_SHIFT, TE_MOD_SUPER };
+    char key[16] = { 0 };
+    if (kb->key == TE_KEY_CHAR) {
+        if (kb->cp == ' ') {
+            (void)str_copy(key, sizeof key, "Space");
+        } else if (kb->cp >= 0x21 && kb->cp <= 0x7E) {
+            char c = (char)kb->cp;
+            key[0] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
+            key[1] = '\0';
+        } else {
+            return TE_ERR_INVAL;
+        }
+    } else {
+        const char *name = nullptr;
+        for (size_t i = 0; i < TE_ARRAY_LEN(key_names); i++) {
+            if (key_names[i].key == kb->key) {
+                name = key_names[i].name;   /* the first spelling of each key is the display one */
+                break;
+            }
+        }
+        if (name == nullptr || str_copy(key, sizeof key, name) != TE_OK) {
+            return TE_ERR_INVAL;
+        }
+        if (key[0] >= 'a' && key[0] <= 'z') {
+            key[0] = (char)(key[0] - 'a' + 'A');
+        }
+    }
+    for (size_t i = 0; i < TE_ARRAY_LEN(mod_order); i++) {
+        if ((kb->mods & mod_order[i]) != 0 && str_append(out, outsz, mod_names[i]) != TE_OK) {
+            out[0] = '\0';
+            return TE_ERR_TRUNC;
+        }
+    }
+    if (str_append(out, outsz, key) != TE_OK) {
+        out[0] = '\0';
+        return TE_ERR_TRUNC;
+    }
+    return TE_OK;
 }

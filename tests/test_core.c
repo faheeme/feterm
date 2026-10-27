@@ -1096,10 +1096,50 @@ static void test_keymap(void)
     te_keymap k;
     keymap_defaults(&k);
     uint32_t cs = TE_MOD_CTRL | TE_MOD_SHIFT;
+    char d[48] = { 0 };
+#ifdef __APPLE__
+    /* macOS: Cmd shortcuts; Ctrl and Ctrl+Shift belong to the shell. */
+    uint32_t cmd = TE_MOD_SUPER;
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'c', cmd) == TE_ACT_COPY);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'v', cmd) == TE_ACT_PASTE);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'c', cs) == TE_ACT_NONE);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'c', TE_MOD_CTRL) == TE_ACT_NONE);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'w', cmd) == TE_ACT_CLOSE_PANE);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 't', cmd) == TE_ACT_NEW_TAB);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'd', cmd) == TE_ACT_SPLIT_RIGHT);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'd', cmd | TE_MOD_SHIFT) == TE_ACT_SPLIT_DOWN);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, '1', cmd) == TE_ACT_GOTO_TAB_1);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, '9', cmd) == TE_ACT_GOTO_TAB_9);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, '1', TE_MOD_ALT) == TE_ACT_NONE);   /* Option+digit types characters */
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, ']', cmd | TE_MOD_SHIFT) == TE_ACT_NEXT_TAB);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, ']', cmd) == TE_ACT_FOCUS_NEXT_PANE);
+    CHECK(keymap_lookup(&k, TE_KEY_UP, 0, cmd) == TE_ACT_PREV_PROMPT);
+    CHECK(keymap_lookup(&k, TE_KEY_LEFT, 0, cmd | TE_MOD_CTRL) == TE_ACT_RESIZE_LEFT);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'b', cmd | TE_MOD_ALT) == TE_ACT_SEND_BREAK);
+    CHECK(keymap_lookup(&k, TE_KEY_INSERT, 0, TE_MOD_SHIFT) == TE_ACT_NONE);   /* no primary selection */
+    CHECK(keymap_describe(&k, TE_ACT_CLOSE_PANE, d, sizeof d) == TE_OK && strcmp(d, "Cmd+W") == 0);
+    CHECK(keymap_describe(&k, TE_ACT_QUICK_CONNECT, d, sizeof d) == TE_OK && strcmp(d, "Shift+Cmd+N") == 0);
+    CHECK(keymap_describe(&k, TE_ACT_PASTE_PRIMARY, d, sizeof d) == TE_ERR_NOTFOUND && d[0] == '\0');
+#else
     CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'c', cs) == TE_ACT_COPY);
     CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'C', cs) == TE_ACT_COPY);
     CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'c', TE_MOD_CTRL) == TE_ACT_NONE);   /* plain Ctrl+C goes to the shell */
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, '1', TE_MOD_ALT) == TE_ACT_GOTO_TAB_1);
+    CHECK(keymap_describe(&k, TE_ACT_CLOSE_PANE, d, sizeof d) == TE_OK && strcmp(d, "Ctrl+Shift+W") == 0);
+    CHECK(keymap_describe(&k, TE_ACT_SEND_BREAK, d, sizeof d) == TE_OK && strcmp(d, "Ctrl+Shift+Pause") == 0);
+#endif
     CHECK(keymap_lookup(&k, TE_KEY_PAGE_UP, 0, TE_MOD_SHIFT) == TE_ACT_SCROLL_PAGE_UP);
+    /* Mac spellings of the modifiers work on every platform. */
+    CHECK(keymap_set(&k, "new_tab", "cmd+shift+t, command+t") == TE_OK);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 't', TE_MOD_SUPER | TE_MOD_SHIFT) == TE_ACT_NEW_TAB);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 't', TE_MOD_SUPER) == TE_ACT_NEW_TAB);
+    CHECK(keymap_set(&k, "prev_prompt", "option+up, opt+shift+up") == TE_OK);
+    CHECK(keymap_lookup(&k, TE_KEY_UP, 0, TE_MOD_ALT) == TE_ACT_PREV_PROMPT);
+    CHECK(keymap_lookup(&k, TE_KEY_UP, 0, TE_MOD_ALT | TE_MOD_SHIFT) == TE_ACT_PREV_PROMPT);
+    CHECK(keymap_set(&k, "search", "ctrl+space") == TE_OK);
+    CHECK(keymap_describe(&k, TE_ACT_SEARCH, d, sizeof d) == TE_OK && strcmp(d, "Ctrl+Space") == 0);
+    CHECK(keymap_describe(&k, TE_ACT_SEARCH, d, 4) == TE_ERR_TRUNC && d[0] == '\0');   /* never a cut-off hint */
+    CHECK(keymap_describe(&k, TE_ACT_NONE, d, sizeof d) == TE_ERR_INVAL);
     CHECK(keymap_set(&k, "copy", "ctrl+insert, alt+c") == TE_OK);
     CHECK(keymap_lookup(&k, TE_KEY_INSERT, 0, TE_MOD_CTRL) == TE_ACT_COPY);
     CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'c', TE_MOD_ALT) == TE_ACT_COPY);

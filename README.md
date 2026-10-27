@@ -99,6 +99,27 @@ Differences from Linux:
 - `ssh` typed by hand in a PowerShell or cmd tab doesn't open the Files tab (the same as on
   Linux). Use a session or Quick Connect.
 
+### macOS
+
+macOS 14 Sonoma or newer on Apple Silicon (every M1, M2, M3, M4 and M5 Mac), or macOS 15
+Sequoia or newer on Intel. The disk images are built on GitHub's macOS runners (the
+repository is mirrored there from GitLab): `feterm-X.Y.Z-macos-arm64.dmg` and
+`feterm-X.Y.Z-macos-x86_64.dmg`. Open the image and drag **FeTerm** to Applications.
+
+The app is not signed with an Apple Developer ID yet, so macOS blocks the first launch.
+On macOS 15 and newer: open FeTerm once, dismiss the warning, then go to **System
+Settings → Privacy & Security** and choose **Open Anyway** (on macOS 14, right-click the
+app and choose **Open**). Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/FeTerm.app`.
+
+Differences from Linux:
+- **Shortcuts use Cmd**, like Terminal.app and iTerm2 (see the table below).
+- **Option types characters** (Option+3 is # on a UK keyboard, Option+e e is é). To use
+  Option as Alt/Meta for word jumps in the shell, set `[keyboard] macos_option_as_alt =
+  left` (or `right` / `both`).
+- **Cmd+click opens links** (Ctrl+click is a right-click on a Mac).
+- Settings live in `~/.config/feterm`, as on Linux. Serial adapters appear as
+  `/dev/cu.usbserial-*` or `/dev/cu.usbmodem*`.
+
 ## Build
 
 Fedora:
@@ -180,7 +201,31 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Ctrl+Shift+N | quick connect (SSH, Telnet or serial without saving) |
 | Ctrl+Shift+Pause, Ctrl+Pause | send a Break (serial and Telnet sessions) |
 
+On macOS the defaults use Cmd instead:
+
+| macOS shortcut | Action |
+|---|---|
+| Cmd+C / Cmd+V | copy / paste |
+| Cmd+click | open a link |
+| Cmd+F | search the scrollback |
+| Cmd+Up / Cmd+Down | previous / next shell prompt |
+| Cmd+= / Cmd+- / Cmd+0 | zoom in / out / reset |
+| Cmd+Option+Up / Down, Cmd+Home / End | scroll by line / to the top or bottom |
+| Cmd+T / Cmd+W | new tab / close pane |
+| Cmd+D / Cmd+Shift+D | split right / split down |
+| Cmd+Shift+] / [ , Ctrl+Tab, Cmd+1..9 | next / previous / numbered tab |
+| Cmd+] / Cmd+[ | focus next / previous pane |
+| Ctrl+Cmd+arrows | resize panes |
+| Cmd+Shift+Enter | zoom the focused pane |
+| Cmd+Shift+H / Cmd+Shift+R / Cmd+Shift+. | highlighting / reload configuration / next theme |
+| Cmd+B, Cmd+Shift+1 / 2 | sidebar, Sessions / Files tab |
+| Cmd+Shift+N | quick connect |
+| Cmd+Option+B | send a Break (serial and Telnet sessions) |
+| Cmd+Q, Cmd+H, Cmd+M, Ctrl+Cmd+F | quit, hide, minimise, full screen (the standard Mac menu) |
+
 Every shortcut can be changed in the `[keys]` section of `config.ini`.
+Every shortcut can be changed in the `[keys]` section of `config.ini` (`cmd` and `option`
+are accepted as names for super and alt).
 
 New local shells start with a small banner: the FeTerm logo, the version and the author.
 Turn it off with `[terminal] banner = false`. The name, author and email come from the

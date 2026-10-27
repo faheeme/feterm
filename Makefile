@@ -82,7 +82,7 @@ CPPFLAGS += -include src/util/compat_mac.h
 MACOS_MIN ?= $(shell sw_vers -productVersion | cut -d. -f1).0
 CFLAGS   += -mmacosx-version-min=$(MACOS_MIN)
 LDFLAGS  += -mmacosx-version-min=$(MACOS_MIN) -Wl,-headerpad_max_install_names
-OS_LIBS  := -framework OpenGL
+OS_LIBS  := -framework OpenGL -lobjc
 EXCLUDE  := $(WIN_ONLY) $(LINUX_ONLY)
 else
 LDFLAGS  += -pie -Wl,-z,relro,-z,now,-z,noexecstack,--as-needed

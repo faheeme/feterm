@@ -154,7 +154,7 @@ int serial_helper_main(int argc, char **argv)
     }
     static const char *const flows[] = { "none", "RTS/CTS", "XON/XOFF" };
     static const char parities[] = { 'N', 'E', 'O' };
-    helper_sayf("\x1b[2mConnected to %s at %u %u%c%u, flow control %s. Ctrl+Shift+Pause sends a Break.\x1b[0m\r\n",
+    helper_sayf("\x1b[2mConnected to %s at %u %u%c%u, flow control %s. " TE_BREAK_HINT " sends a Break.\x1b[0m\r\n",
                 argv[0], (unsigned)cfg.baud, (unsigned)cfg.data_bits, parities[cfg.parity], (unsigned)cfg.stop_bits,
                 flows[cfg.flow]);
 

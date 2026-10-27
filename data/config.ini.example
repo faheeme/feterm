@@ -109,7 +109,10 @@ word_chars = -_./~:@%+=?&#*
 
 [keys]
 ; Up to two bindings per action, comma-separated; "none" removes a binding.
-; Modifiers: ctrl shift alt super. Keys: a-z 0-9 f1-f12 enter escape tab
+; Modifiers: ctrl shift alt super (on a Mac also cmd and option).
+; These are the Linux and Windows defaults; macOS defaults use Cmd (Cmd+C,
+; Cmd+T, Cmd+W, Cmd+D...), so leave this section out on a Mac unless you want
+; to change something. Keys: a-z 0-9 f1-f12 enter escape tab
 ; backspace insert delete home end page_up page_down up down left right
 ; space equal plus minus comma period slash ...
 copy = ctrl+shift+c
@@ -162,6 +165,11 @@ sidebar_files = ctrl+shift+2
 quick_connect = ctrl+shift+n
 ; Serial and Telnet sessions: send a Break (e.g. to reach ROMMON)
 send_break = ctrl+shift+pause, ctrl+pause
+
+[keyboard]
+; macOS only: which Option keys act as Alt/Meta (Esc prefix, for word jumps in
+; the shell) instead of typing characters such as # or é: none, left, right, both.
+macos_option_as_alt = none
 
 [security]
 ; Let programs SET the clipboard via OSC 52 (reading it is never allowed)

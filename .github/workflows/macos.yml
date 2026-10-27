@@ -61,14 +61,18 @@ jobs:
         # The fuzzers are never shipped; lld links them on runners whose Xcode ld is too old for LLVM's objects.
         run: make fuzz FUZZ_TIME=20 FUZZ_LDFLAGS=-fuse-ld=lld
 
-      - name: Terminal end to end (pty, shell, exit)
+      - name: Terminal end to end (pty, shell, exit, Cmd+W menu)
         run: |
           out="$RUNNER_TEMP/pty-ok"
+          log="$RUNNER_TEMP/feterm.log"
           rm -f "$out"
           # perl's alarm stands in for timeout(1), which macOS lacks.
-          perl -e 'alarm 60; exec @ARGV' ./feterm -e /bin/sh -c "tty > '$out'; stty size >> '$out'; locale charmap >> '$out'" || true
+          perl -e 'alarm 60; exec @ARGV' ./feterm --verbose -e /bin/sh -c "tty > '$out'; stty size >> '$out'; locale charmap >> '$out'" 2> "$log" || true
           cat "$out"
           grep -q '^/dev/ttys' "$out"
+          # SDL's Window menu must no longer own Cmd+W (it is close_pane).
+          grep 'Cmd+W' "$log"
+          grep -q 'Cmd+W freed' "$log"
 
       - name: Render snapshot
         run: |

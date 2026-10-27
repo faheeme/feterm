@@ -813,9 +813,11 @@ static void on_disconnect(app *a, te_pane *p)
                       p->status, (unsigned)(delay / 1000u));
     } else {
         p->reconnect_at_ms = 0;
+        char close_key[48] = { 0 };
+        bool bound = keymap_describe(&a->cfg.keys, TE_ACT_CLOSE_PANE, close_key, sizeof close_key) == TE_OK;
         (void)str_fmt(msg, sizeof msg,
-                      "\r\n\x1b[33m[Connection lost (exit %d). Press Enter to reconnect, or Ctrl+Shift+W to close.]\x1b[0m\r\n",
-                      p->status);
+                      "\r\n\x1b[33m[Connection lost (exit %d). Press Enter to reconnect%s%s%s.]\x1b[0m\r\n",
+                      p->status, bound ? ", or " : "", close_key, bound ? " to close" : "");
     }
     pane_note(p, msg);
     a->need_render = true;
@@ -1304,9 +1306,11 @@ static void reload_config(app *a)
         pane_setup_highlight(all[i], &a->cfg);
     }
     update_opacity(a);
+    plat_set_option_as_alt(a->plat, a->cfg.option_as_alt);
     apply_files_config(a);
     if (a->sb_ready) {
         sidebar_configure(&a->sb, a->cfg.sidebar_visible, a->cfg.sidebar_right, a->cfg.sidebar_width, false);
+        sidebar_set_keymap(&a->sb, &a->cfg.keys);
         sidebar_reload(&a->sb);
     }
     apply_size(a);
@@ -1645,7 +1649,7 @@ static void update_hover(app *a, te_pane *p, float px, float py, uint32_t mods)
 {
     uint16_t col = 0;
     uint16_t row = 0;
-    bool want = p != nullptr && (mods & TE_MOD_CTRL) != 0 && a->urls != nullptr &&
+    bool want = p != nullptr && (mods & TE_MOD_LINK) != 0 && a->urls != nullptr &&
                 pixel_to_cell(a, p, px, py, &col, &row);
     bool had = a->hover_valid;
     char prev[TE_MAX_URI + 1] = { 0 };
@@ -1659,7 +1663,7 @@ static void update_hover(app *a, te_pane *p, float px, float py, uint32_t mods)
     if (a->hover_valid && strcmp(prev, a->hover.uri) != 0) {
         char msg[128] = { 0 };
         bool cut = strnlen(a->hover.uri, sizeof a->hover.uri) > 96;
-        (void)str_fmt(msg, sizeof msg, "%.96s%s  —  Ctrl+click to open", a->hover.uri, cut ? "..." : "");
+        (void)str_fmt(msg, sizeof msg, "%.96s%s  —  " TE_MOD_LINK_NAME "+click to open", a->hover.uri, cut ? "..." : "");
         show_toast(a, msg);
     }
     te_pointer ptr = a->hover_valid ? TE_POINTER_HAND : TE_POINTER_TEXT;
@@ -1847,7 +1851,7 @@ static void on_button(app *a, const te_event *ev)
         a->press_col = col;
         a->press_row = row;
         a->press_mods = mods;
-        a->link_click = (mods & TE_MOD_CTRL) != 0;
+        a->link_click = (mods & TE_MOD_LINK) != 0;
         a->press_valid = ev->button.clicks == 1 && mods == 0;
         a->sel_pending = false;
         if (a->link_click) {
@@ -2480,6 +2484,7 @@ int main(int argc, char **argv)
     }
     a.opacity = 0.0f;   /* forces the first update_opacity() to report a fallback */
     update_opacity(&a);
+    plat_set_option_as_alt(a.plat, a.cfg.option_as_alt);
     a.scale = plat_content_scale(a.plat);
     a.font_pt = a.cfg.font_size;
     a.layout.divider = (int)lroundf(2.0f * a.scale);
@@ -2516,6 +2521,7 @@ int main(int argc, char **argv)
         te_files_host fh = { .user = &a, .dialog = host_files_dialog, .toast = host_sb_toast, .copy = host_sb_copy };
         sidebar_init(&a.sb, have_root ? root : nullptr, &sh, &fh);
         sidebar_configure(&a.sb, a.cfg.sidebar_visible, a.cfg.sidebar_right, a.cfg.sidebar_width, true);
+        sidebar_set_keymap(&a.sb, &a.cfg.keys);
         a.sb_ready = true;
     }
     apply_files_config(&a);

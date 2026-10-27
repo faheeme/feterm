@@ -252,6 +252,16 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
         } else if (krc != TE_OK) {
             LOG_W("%s:%u: cannot parse key binding '%s' (e.g. ctrl+shift+c, f5, none)", path, line, value);
         }
+    } else if (strcmp(sec, "keyboard") == 0) {
+        if (strcmp(key, "macos_option_as_alt") == 0) {
+            if (strcmp(value, "none") == 0) c->option_as_alt = 0;
+            else if (strcmp(value, "left") == 0) c->option_as_alt = TE_OPTION_LEFT;
+            else if (strcmp(value, "right") == 0) c->option_as_alt = TE_OPTION_RIGHT;
+            else if (strcmp(value, "both") == 0) c->option_as_alt = TE_OPTION_LEFT | TE_OPTION_RIGHT;
+            else BAD("macos_option_as_alt (none|left|right|both)");
+        } else {
+            LOG_W("%s:%u: unknown key [keyboard] %s", path, line, key);
+        }
     } else if (strcmp(sec, "security") == 0) {
         if (strcmp(key, "osc52_write") == 0) {
             if (str_to_bool(value, &b)) c->osc52_write = b; else BAD("boolean");
