@@ -76,6 +76,17 @@ Windows 10 (version 1809 or newer) and 11, x64. Download from the
 The files are not code-signed yet, so SmartScreen may warn the first time: choose
 **More info → Run anyway**. Settings and sessions live in `%APPDATA%\feterm`.
 
+If Microsoft Defender blocks or quarantines FeTerm instead:
+
+1. **Allow it from Protection history.** Open **Windows Security → Virus & threat
+   protection → Protection history**, select the entry for FeTerm and choose **Actions →
+   Allow on device**.
+2. **If it's still blocked, add an exclusion.** In **Virus & threat protection settings →
+   Manage settings → Exclusions**, choose **Add or remove exclusions** and add FeTerm's
+   folder (or just `feterm.exe`).
+
+An exclusion stops Defender scanning that folder at all, so keep it to FeTerm's own folder.
+
 SSH sessions and the Files tab use the OpenSSH client that comes with Windows. If `ssh -V`
 says "not recognized", add it under **Settings → System → Optional features → OpenSSH
 Client**. Telnet and serial sessions need nothing extra.
