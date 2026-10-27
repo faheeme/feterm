@@ -196,9 +196,16 @@ bool session_user_valid(const char *user)
     if (n > TE_SESS_USER_MAX || (n > 0 && user[0] == '-')) {
         return false;
     }
+    /* Allow-list only. The file browser passes the name to ssh as "-o User=<value>",
+     * which OpenSSH does not screen for metacharacters the way it screens a command-line
+     * user name. If the user's ssh_config expands %r inside ProxyCommand / Match exec /
+     * LocalCommand (all run via /bin/sh -c), anything but a plain name is a shell-injection
+     * risk, so reject every character outside [A-Za-z0-9._-]. */
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)user[i];
-        if (c <= 0x20 || c == 0x7F || c >= 0x80 || c == '@' || c == ':') {
+        bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' ||
+                  c == '_' || c == '-';
+        if (!ok) {
             return false;
         }
     }

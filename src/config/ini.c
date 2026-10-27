@@ -18,8 +18,11 @@ static void skip_rest_of_line(FILE *fp)
     }
 }
 
-/* Takes ownership of fd: on failure it is closed. */
-static FILE *open_checked(int fd, const char *path)
+/* Takes ownership of fd: on failure it is closed. When strict, the file must be
+ * owned by this user and not writable by group or others; otherwise it is only a
+ * warning. Session files are loaded strict, because a "local" session runs a shell
+ * command, so a tampered one is code execution. */
+static FILE *open_checked(int fd, const char *path, bool strict)
 {
     if (fd < 0) {
         return nullptr;
@@ -36,9 +39,18 @@ static FILE *open_checked(int fd, const char *path)
         errno = EFBIG;
         return nullptr;
     }
-    if ((st.st_mode & S_IWOTH) != 0) {
+#ifndef _WIN32
+    if (strict && (st.st_uid != getuid() || (st.st_mode & (S_IWGRP | S_IWOTH)) != 0)) {
+        LOG_E("%s: not owned by you or writable by others; refusing to load it", path);
+        close(fd);
+        errno = EPERM;
+        return nullptr;
+    }
+#endif
+    if (!strict && (st.st_mode & S_IWOTH) != 0) {
         LOG_W("%s: file is world-writable; anyone can change your terminal configuration", path);
     }
+    (void)strict;
     FILE *fp = fdopen(fd, "r");
     if (fp == nullptr) {
         close(fd);
@@ -109,7 +121,7 @@ te_err ini_parse_file(const char *path, ini_handler cb, void *user)
     if (path == nullptr || cb == nullptr) {
         return TE_ERR_INVAL;
     }
-    FILE *fp = open_checked(open(path, O_RDONLY | O_CLOEXEC | O_NOCTTY), path);
+    FILE *fp = open_checked(open(path, O_RDONLY | O_CLOEXEC | O_NOCTTY), path, false);
     if (fp == nullptr) {
         return errno == ENOENT ? TE_ERR_NOTFOUND : TE_ERR_IO;
     }
@@ -121,7 +133,7 @@ te_err ini_parse_at(int dirfd, const char *name, const char *display, ini_handle
     if (dirfd < 0 || name == nullptr || display == nullptr || cb == nullptr) {
         return TE_ERR_INVAL;
     }
-    FILE *fp = open_checked(openat(dirfd, name, O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NOFOLLOW), display);
+    FILE *fp = open_checked(openat(dirfd, name, O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NOFOLLOW), display, true);
     if (fp == nullptr) {
         return errno == ENOENT ? TE_ERR_NOTFOUND : TE_ERR_IO;
     }

@@ -2394,6 +2394,7 @@ static void run(app *a)
 
 int main(int argc, char **argv)
 {
+    os_harden_process();   /* drop the current dir from the DLL/exe search order (Windows) */
 #ifndef _WIN32
     /* Helper modes: the built-in Telnet and serial clients run inside a pane
      * (on Windows they are feterm-helper.exe, a console program). */

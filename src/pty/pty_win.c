@@ -62,9 +62,19 @@ void *pty_ready_handle(const te_pty *p)
 static char *find_powershell(void)
 {
     wchar_t found[MAX_PATH] = { 0 };
-    DWORD n = SearchPathW(nullptr, L"pwsh.exe", nullptr, MAX_PATH, found, nullptr);
-    if (n > 0 && n < MAX_PATH) {
-        return te_w_narrow(found);
+    /* Resolve against PATH only. Passing nullptr would let SearchPathW search the
+     * current directory, where a planted pwsh.exe could shadow the real one. */
+    DWORD plen = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    if (plen > 1) {
+        wchar_t *path = te_calloc(plen, sizeof *path);
+        if (path != nullptr && GetEnvironmentVariableW(L"PATH", path, plen) == plen - 1) {
+            DWORD n = SearchPathW(path, L"pwsh.exe", nullptr, MAX_PATH, found, nullptr);
+            if (n > 0 && n < MAX_PATH) {
+                TE_FREE(path);
+                return te_w_narrow(found);
+            }
+        }
+        TE_FREE(path);
     }
     wchar_t sys[MAX_PATH] = { 0 };
     UINT s = GetSystemDirectoryW(sys, MAX_PATH);
