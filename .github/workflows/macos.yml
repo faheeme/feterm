@@ -85,6 +85,15 @@ jobs:
           perl -e 'alarm 60; exec @ARGV' ./build/render_snapshot "$RUNNER_TEMP/snapshot.ppm"
           sips -s format png "$RUNNER_TEMP/snapshot.ppm" --out "snapshot-${{ matrix.arch }}.png"
 
+      - name: Package-manager install (what the Homebrew formula runs)
+        run: |
+          prefix="$RUNNER_TEMP/prefix"
+          make install PREFIX="$prefix"
+          make app-unbundled PREFIX="$prefix"
+          "$prefix/bin/feterm" --version
+          ls "$prefix/share/feterm" "$prefix/FeTerm.app/Contents/MacOS"
+          test -f "$prefix/share/feterm/fonts.conf" && test -f "$prefix/share/man/man1/feterm.1"
+
       - name: App bundle and disk image
         run: |
           make dmg
