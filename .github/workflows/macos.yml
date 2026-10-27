@@ -39,6 +39,10 @@ jobs:
 
       - name: Dependencies
         run: |
+          # The newest Xcode on the image: an older ld cannot read objects from Homebrew's LLVM.
+          xcode=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          echo "using $xcode"
           brew install llvm sdl3 pcre2 freetype fontconfig pkgconf dylibbundler
           # Apple's clang lags upstream; C23 (<stdckdint.h>, nullptr) and libFuzzer need Homebrew's.
           echo "CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
