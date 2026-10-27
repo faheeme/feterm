@@ -223,6 +223,7 @@ te_err sixel_decode(const vt_params *params, const char *d, size_t len, uint32_t
     uint32_t color = 0;
     uint32_t raster_w = 0;
     uint32_t raster_h = 0;
+    uint64_t work = 0;       /* cumulative horizontal fill, capped to bound CPU */
     te_err rc = TE_OK;
 
     for (size_t i = 0; i < len;) {
@@ -276,6 +277,10 @@ te_err sixel_decode(const vt_params *params, const char *d, size_t len, uint32_t
                 continue;   /* outside the maximum canvas: ignored */
             }
             uint32_t end = TE_MIN(x + rep, TE_SIXEL_MAX_DIM);
+            work += (uint64_t)(end - x);
+            if (work > TE_SIXEL_MAX_WORK) {
+                break;   /* bound total pixel writes: "!n~$" repeats cannot hog the CPU */
+            }
             if (bits != 0) {
                 uint32_t need_h = TE_MIN(y + 6u, TE_SIXEL_MAX_DIM);
                 if (!canvas_grow(&c, end, need_h)) {
