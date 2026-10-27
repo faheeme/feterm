@@ -36,10 +36,21 @@ void os_harden_process(void);
 /*
  * Tag a file that just arrived from a remote host with the Mark-of-the-Web, so
  * the OS treats it as untrusted (SmartScreen/zone warnings). Writes a
- * Zone.Identifier stream on Windows; a no-op on POSIX. Best-effort: failure is
- * ignored, since it only adds a warning and never blocks the download.
+ * Zone.Identifier stream on Windows and the com.apple.quarantine attribute on
+ * macOS; a no-op on Linux. Best-effort: failure is ignored, since it only adds
+ * a warning and never blocks the download.
  */
 void os_mark_from_internet(const char *path);
+
+#ifndef _WIN32
+/*
+ * Make fd non-blocking. Set a pty master's flag before fork(): on macOS the
+ * pty driver can refuse it (ENOTTY) while the child is opening the other end.
+ * On macOS an ENOTTY whose flag nonetheless took effect counts as success, as
+ * the kernel records O_NONBLOCK before asking the driver and reads honour it.
+ */
+[[nodiscard]] bool os_set_nonblock(int fd);
+#endif
 
 #ifdef _WIN32
 /* %LOCALAPPDATA%: per-user data that stays on this machine. */

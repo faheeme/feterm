@@ -13,6 +13,9 @@ void config_defaults(te_config *c)
 #ifdef _WIN32
     /* fontconfig's generic "monospace" means Courier New on Windows. */
     (void)str_copy(c->font_family, sizeof c->font_family, "Cascadia Mono,Consolas");
+#elif defined(__APPLE__)
+    /* Menlo ships with every macOS; fontconfig's "monospace" points at fonts it lacks. */
+    (void)str_copy(c->font_family, sizeof c->font_family, "Menlo,Monaco");
 #else
     (void)str_copy(c->font_family, sizeof c->font_family, "monospace");
 #endif
@@ -248,6 +251,16 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
             LOG_W("%s:%u: unknown action '%s'", path, line, key);
         } else if (krc != TE_OK) {
             LOG_W("%s:%u: cannot parse key binding '%s' (e.g. ctrl+shift+c, f5, none)", path, line, value);
+        }
+    } else if (strcmp(sec, "keyboard") == 0) {
+        if (strcmp(key, "macos_option_as_alt") == 0) {
+            if (strcmp(value, "none") == 0) c->option_as_alt = 0;
+            else if (strcmp(value, "left") == 0) c->option_as_alt = TE_OPTION_LEFT;
+            else if (strcmp(value, "right") == 0) c->option_as_alt = TE_OPTION_RIGHT;
+            else if (strcmp(value, "both") == 0) c->option_as_alt = TE_OPTION_LEFT | TE_OPTION_RIGHT;
+            else BAD("macos_option_as_alt (none|left|right|both)");
+        } else {
+            LOG_W("%s:%u: unknown key [keyboard] %s", path, line, key);
         }
     } else if (strcmp(sec, "security") == 0) {
         if (strcmp(key, "osc52_write") == 0) {

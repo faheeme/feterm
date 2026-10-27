@@ -10,6 +10,7 @@
 #include FT_SYNTHESIS_H
 #include <fontconfig/fontconfig.h>
 
+#include "config/paths.h"
 #include "util/log.h"
 #include "util/mem.h"
 #include "util/str.h"
@@ -167,6 +168,31 @@ static void compute_metrics(te_font *f, float line_height)
     if (m->strike_pos < 0) m->strike_pos = 0;
 }
 
+/*
+ * The .app bundle ships its own fonts.conf (macOS's font folders, a cache in
+ * ~/Library/Caches): the fontconfig library inside it would otherwise look for
+ * Homebrew's configuration, which the user's Mac may not have. FONTCONFIG_FILE
+ * still wins, and without a bundled file the library's default is used.
+ */
+static FcConfig *load_fc_config(void)
+{
+#ifdef __APPLE__
+    char path[TE_PATH_MAX] = { 0 };
+    const char *env = getenv("FONTCONFIG_FILE");
+    if ((env == nullptr || env[0] == '\0') && paths_find_data("fonts.conf", path, sizeof path) == TE_OK) {
+        FcConfig *c = FcConfigCreate();
+        if (c != nullptr && FcConfigParseAndLoad(c, (const FcChar8 *)path, FcTrue) && FcConfigBuildFonts(c)) {
+            return c;
+        }
+        LOG_W("could not load %s; using fontconfig's default configuration", path);
+        if (c != nullptr) {
+            FcConfigDestroy(c);
+        }
+    }
+#endif
+    return FcInitLoadConfigAndFonts();
+}
+
 te_err font_create(te_font **out, const char *family, float px_size, float line_height)
 {
     if (out == nullptr || family == nullptr || !(px_size >= 4.0f && px_size <= 512.0f)) {
@@ -188,7 +214,7 @@ te_err font_create(te_font **out, const char *family, float px_size, float line_
         rc = TE_ERR_FONT;
         goto fail;
     }
-    f->fc = FcInitLoadConfigAndFonts();
+    f->fc = load_fc_config();
     if (f->fc == nullptr) {
         rc = TE_ERR_FONT;
         goto fail;

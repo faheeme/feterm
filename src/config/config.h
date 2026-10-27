@@ -11,6 +11,9 @@ typedef enum { TE_TABBAR_AUTO, TE_TABBAR_ALWAYS, TE_TABBAR_NEVER } te_tabbar_mod
 typedef enum { TE_NOTIFY_UNFOCUSED, TE_NOTIFY_ALWAYS, TE_NOTIFY_NEVER } te_notify_mode;
 typedef enum { TE_RECONNECT_ASK, TE_RECONNECT_AUTO, TE_RECONNECT_NEVER } te_reconnect_mode;
 
+/* [keyboard] macos_option_as_alt: which Option keys are Alt (Meta) instead of typing characters. */
+enum { TE_OPTION_LEFT = 1u << 0, TE_OPTION_RIGHT = 1u << 1 };
+
 typedef struct te_config {
     /* [font] */
     char            font_family[256];
@@ -62,6 +65,8 @@ typedef struct te_config {
     char            editor[1024];     /* program for "Edit locally"; empty: xdg-open */
     /* [keys] */
     te_keymap       keys;
+    /* [keyboard] */
+    uint8_t         option_as_alt;    /* macOS: TE_OPTION_LEFT | TE_OPTION_RIGHT act as Alt; 0: both type characters */
     /* [security] */
     bool            osc52_write;      /* allow programs to SET the clipboard */
     bool            paste_sanitize;   /* strip control characters from pastes */

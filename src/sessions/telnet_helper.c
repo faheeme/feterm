@@ -12,7 +12,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
@@ -32,7 +31,18 @@ static int connect_to(const char *host, const char *port, char *why, size_t whys
     }
     int fd = -1;
     for (struct addrinfo *ai = res; ai != nullptr; ai = ai->ai_next) {
+#ifdef __APPLE__
+        /* No SOCK_CLOEXEC/SOCK_NONBLOCK on macOS; SO_NOSIGPIPE makes a dead peer EPIPE, not SIGPIPE. */
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        int one = 1;
+        if (fd >= 0 && (!te_mac_set_fd_flags(fd, true, true) ||
+                        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, (socklen_t)sizeof one) != 0)) {
+            (void)close(fd);
+            fd = -1;
+        }
+#else
         fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC | SOCK_NONBLOCK, ai->ai_protocol);
+#endif
         if (fd < 0) {
             continue;
         }
@@ -66,7 +76,11 @@ static void set_keepalive(int fd, int idle)
     int intvl = idle / 3 > 5 ? idle / 3 : 5;
     int cnt = 9;
     (void)setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
+#ifdef __APPLE__
+    (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof idle);   /* macOS's name for TCP_KEEPIDLE */
+#else
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof idle);
+#endif
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
     (void)setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof cnt);
     (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &on, sizeof on);

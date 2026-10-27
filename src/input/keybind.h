@@ -1,6 +1,7 @@
 /*
  * Configurable shortcuts. [keys] in config.ini maps an action to up to two
- * key specs, e.g.  copy = ctrl+shift+c, ctrl+insert   or   search = none
+ * key specs, e.g.  copy = ctrl+shift+c, ctrl+insert   or   search = none.
+ * The macOS spellings work too: cmd/command for super, option/opt for alt.
  */
 #ifndef TE_KEYBIND_H
 #define TE_KEYBIND_H
@@ -68,5 +69,8 @@ void keymap_defaults(te_keymap *m);
 /* Set an action's bindings from a spec ("ctrl+shift+c, ctrl+insert" or "none"). */
 [[nodiscard]] te_err keymap_set(te_keymap *m, const char *action, const char *spec);
 [[nodiscard]] te_action keymap_lookup(const te_keymap *m, te_key key, uint32_t cp, uint32_t mods);
+/* The action's first binding as text for hints, e.g. "Ctrl+Shift+W" or, on macOS,
+ * "Cmd+W". TE_ERR_NOTFOUND (and "") when the action is unbound. */
+[[nodiscard]] te_err keymap_describe(const te_keymap *m, te_action a, char *out, size_t outsz);
 
 #endif

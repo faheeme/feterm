@@ -16,6 +16,10 @@
 
 #define TE_ICON_MAX 512   /* largest embedded icon side we accept */
 
+#ifdef __APPLE__
+bool plat_macos_free_close_key(void);   /* menu_mac.c */
+#endif
+
 struct te_platform {
     SDL_Window    *win;
     SDL_GLContext  gl;
@@ -28,6 +32,7 @@ struct te_platform {
     uint32_t       dialog_event;   /* file dialog answers */
 
     te_fdwatch    *watch;          /* fds (POSIX) or HANDLEs (Windows) */
+    unsigned       option_as_alt;  /* macOS: bit 0 left, bit 1 right Option is Alt */
 };
 
 /* Copies one embedded icon image into a new surface. Returns nullptr on failure. */
@@ -269,9 +274,17 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
     }
     LOG_D("video driver: %s", SDL_GetCurrentVideoDriver());
 
+#ifdef __APPLE__
+    /* No OpenGL ES on macOS: the native 4.1 core profile (see render/gl.h). */
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+    (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+#else
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     (void)SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
     (void)SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
     /* Always ask for an alpha channel, so transparency can be switched on by a
@@ -285,6 +298,13 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
         }
     }
     set_window_icon(p->win);
+#ifdef __APPLE__
+    if (plat_macos_free_close_key()) {
+        LOG_D("macOS: Cmd+W freed from the Window menu for close_pane");
+    } else {
+        LOG_W("macOS: Window > Close not found; Cmd+W may close the window");
+    }
+#endif
     if (!SDL_GL_MakeCurrent(p->win, p->gl)) {
         LOG_E("SDL_GL_MakeCurrent: %s", SDL_GetError());
         plat_destroy(&p);
@@ -407,6 +427,16 @@ static bool translate(te_platform *p, const SDL_Event *e, te_event *ev)
         ev->type = TE_EV_KEY;
         ev->key.key = map_key(e->key.key, &ev->key.cp);
         ev->key.mods = map_mods(e->key.mod);
+#ifdef __APPLE__
+        if (ev->key.key == TE_KEY_CHAR && (ev->key.mods & TE_MOD_ALT) != 0 &&
+            (ev->key.mods & (TE_MOD_CTRL | TE_MOD_SUPER)) == 0) {
+            bool as_alt = ((e->key.mod & SDL_KMOD_LALT) != 0 && (p->option_as_alt & 1u) != 0) ||
+                          ((e->key.mod & SDL_KMOD_RALT) != 0 && (p->option_as_alt & 2u) != 0);
+            if (!as_alt) {
+                ev->key.mods &= ~(uint32_t)TE_MOD_ALT;   /* a character key: the text event carries it */
+            }
+        }
+#endif
         ev->key.down = e->key.down;
         ev->key.repeat = e->key.repeat;
         return ev->key.key != TE_KEY_NONE;
@@ -739,4 +769,11 @@ bool plat_logo_rgba(int size, const uint8_t **rgba, size_t *len)
         }
     }
     return false;
+}
+
+void plat_set_option_as_alt(te_platform *p, unsigned sides)
+{
+    if (p != nullptr) {
+        p->option_as_alt = sides & 3u;
+    }
 }

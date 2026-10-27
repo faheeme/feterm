@@ -11,6 +11,9 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#ifdef __APPLE__
+#include <unistd.h>
+#endif
 
 #include "app/banner.h"
 #include "app/layout.h"
@@ -810,9 +813,11 @@ static void on_disconnect(app *a, te_pane *p)
                       p->status, (unsigned)(delay / 1000u));
     } else {
         p->reconnect_at_ms = 0;
+        char close_key[48] = { 0 };
+        bool bound = keymap_describe(&a->cfg.keys, TE_ACT_CLOSE_PANE, close_key, sizeof close_key) == TE_OK;
         (void)str_fmt(msg, sizeof msg,
-                      "\r\n\x1b[33m[Connection lost (exit %d). Press Enter to reconnect, or Ctrl+Shift+W to close.]\x1b[0m\r\n",
-                      p->status);
+                      "\r\n\x1b[33m[Connection lost (exit %d). Press Enter to reconnect%s%s%s.]\x1b[0m\r\n",
+                      p->status, bound ? ", or " : "", close_key, bound ? " to close" : "");
     }
     pane_note(p, msg);
     a->need_render = true;
@@ -955,6 +960,9 @@ static bool path_is_executable_type(const char *path)
         "js",  "jse", "vbs", "vbe", "wsf", "wsh", "ps1", "psm1", "lnk", "url", "reg",
         "inf", "scf", "msc", "sct", "desktop", "application", "appref-ms", "gadget",
         "dll", "so",  "dylib", "run",
+        /* macOS: bundles, scripts and installers that open runs instead of editing */
+        "app", "command", "tool", "terminal", "pkg", "mpkg", "workflow", "action", "scpt", "scptd",
+        "applescript", "fileloc", "webloc", "inetloc", "prefpane", "kext", "plugin", "bundle", "osax",
     };
     for (size_t i = 0; i < TE_ARRAY_LEN(ext); i++) {
         if (strcasecmp(dot + 1, ext[i]) == 0) {
@@ -985,7 +993,12 @@ static void host_r_edit_open(void *user, const char *path)
         return;
     }
     if (n == 0) {
+#ifdef __APPLE__
+        argv[n++] = "open";
+        argv[n++] = "-t";   /* always the default text editor: never launches the file */
+#else
         argv[n++] = "xdg-open";
+#endif
     }
     argv[n++] = path;
     argv[n] = nullptr;
@@ -1293,9 +1306,11 @@ static void reload_config(app *a)
         pane_setup_highlight(all[i], &a->cfg);
     }
     update_opacity(a);
+    plat_set_option_as_alt(a->plat, a->cfg.option_as_alt);
     apply_files_config(a);
     if (a->sb_ready) {
         sidebar_configure(&a->sb, a->cfg.sidebar_visible, a->cfg.sidebar_right, a->cfg.sidebar_width, false);
+        sidebar_set_keymap(&a->sb, &a->cfg.keys);
         sidebar_reload(&a->sb);
     }
     apply_size(a);
@@ -1634,7 +1649,7 @@ static void update_hover(app *a, te_pane *p, float px, float py, uint32_t mods)
 {
     uint16_t col = 0;
     uint16_t row = 0;
-    bool want = p != nullptr && (mods & TE_MOD_CTRL) != 0 && a->urls != nullptr &&
+    bool want = p != nullptr && (mods & TE_MOD_LINK) != 0 && a->urls != nullptr &&
                 pixel_to_cell(a, p, px, py, &col, &row);
     bool had = a->hover_valid;
     char prev[TE_MAX_URI + 1] = { 0 };
@@ -1648,7 +1663,7 @@ static void update_hover(app *a, te_pane *p, float px, float py, uint32_t mods)
     if (a->hover_valid && strcmp(prev, a->hover.uri) != 0) {
         char msg[128] = { 0 };
         bool cut = strnlen(a->hover.uri, sizeof a->hover.uri) > 96;
-        (void)str_fmt(msg, sizeof msg, "%.96s%s  —  Ctrl+click to open", a->hover.uri, cut ? "..." : "");
+        (void)str_fmt(msg, sizeof msg, "%.96s%s  —  " TE_MOD_LINK_NAME "+click to open", a->hover.uri, cut ? "..." : "");
         show_toast(a, msg);
     }
     te_pointer ptr = a->hover_valid ? TE_POINTER_HAND : TE_POINTER_TEXT;
@@ -1836,7 +1851,7 @@ static void on_button(app *a, const te_event *ev)
         a->press_col = col;
         a->press_row = row;
         a->press_mods = mods;
-        a->link_click = (mods & TE_MOD_CTRL) != 0;
+        a->link_click = (mods & TE_MOD_LINK) != 0;
         a->press_valid = ev->button.clicks == 1 && mods == 0;
         a->sel_pending = false;
         if (a->link_click) {
@@ -2392,6 +2407,29 @@ static void run(app *a)
     }
 }
 
+#ifdef __APPLE__
+/*
+ * Started from Finder or the Dock, an app gets "/" as its directory and no
+ * locale. Shells then open in "/" and treat UTF-8 as bytes, so do what
+ * Terminal.app does: start in the home folder and default to UTF-8.
+ */
+static void macos_launch_env(void)
+{
+    char cwd[16] = { 0 };
+    const char *home = getenv("HOME");
+    if (getcwd(cwd, sizeof cwd) != nullptr && strcmp(cwd, "/") == 0 && home != nullptr && home[0] == '/') {
+        (void)chdir(home);
+    }
+    const char *lc_all = getenv("LC_ALL");
+    const char *lc_ctype = getenv("LC_CTYPE");
+    const char *lang = getenv("LANG");
+    if ((lc_all == nullptr || lc_all[0] == '\0') && (lc_ctype == nullptr || lc_ctype[0] == '\0') &&
+        (lang == nullptr || lang[0] == '\0')) {
+        (void)setenv("LANG", "en_US.UTF-8", 0);
+    }
+}
+#endif
+
 int main(int argc, char **argv)
 {
     os_harden_process();   /* drop the current dir from the DLL/exe search order (Windows) */
@@ -2404,6 +2442,9 @@ int main(int argc, char **argv)
     if (argc >= 2 && strcmp(argv[1], "--serial-helper") == 0) {
         return serial_helper_main(argc - 2, argv + 2);
     }
+#endif
+#ifdef __APPLE__
+    macos_launch_env();
 #endif
     static app a;   /* large (sidebar state); zero-initialised */
 #ifndef _WIN32
@@ -2443,6 +2484,7 @@ int main(int argc, char **argv)
     }
     a.opacity = 0.0f;   /* forces the first update_opacity() to report a fallback */
     update_opacity(&a);
+    plat_set_option_as_alt(a.plat, a.cfg.option_as_alt);
     a.scale = plat_content_scale(a.plat);
     a.font_pt = a.cfg.font_size;
     a.layout.divider = (int)lroundf(2.0f * a.scale);
@@ -2479,6 +2521,7 @@ int main(int argc, char **argv)
         te_files_host fh = { .user = &a, .dialog = host_files_dialog, .toast = host_sb_toast, .copy = host_sb_copy };
         sidebar_init(&a.sb, have_root ? root : nullptr, &sh, &fh);
         sidebar_configure(&a.sb, a.cfg.sidebar_visible, a.cfg.sidebar_right, a.cfg.sidebar_width, true);
+        sidebar_set_keymap(&a.sb, &a.cfg.keys);
         a.sb_ready = true;
     }
     apply_files_config(&a);

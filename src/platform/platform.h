@@ -10,6 +10,14 @@
 #include "common.h"
 
 enum { TE_MOD_SHIFT = 1u << 0, TE_MOD_ALT = 1u << 1, TE_MOD_CTRL = 1u << 2, TE_MOD_SUPER = 1u << 3 };
+/* Held while clicking to open a link: Cmd on macOS (Ctrl+click is a right-click there), Ctrl elsewhere. */
+#ifdef __APPLE__
+#define TE_MOD_LINK      TE_MOD_SUPER
+#define TE_MOD_LINK_NAME "Cmd"
+#else
+#define TE_MOD_LINK      TE_MOD_CTRL
+#define TE_MOD_LINK_NAME "Ctrl"
+#endif
 
 typedef enum te_key {
     TE_KEY_NONE = 0,
@@ -116,5 +124,13 @@ void plat_file_dialog(te_platform *p, te_dialog_kind kind, const char *default_d
 /* Free what a TE_EV_DROP or TE_EV_DIALOG event owns (safe on any event). */
 void plat_event_free(te_event *ev);
 void plat_set_pointer(te_platform *p, te_pointer kind);
+/*
+ * macOS: which Option keys act as Alt (bit 0 left, bit 1 right). The others
+ * type characters (Option+3 is # on a UK keyboard): key events for character
+ * keys then drop TE_MOD_ALT and the composed text arrives as TE_EV_TEXT. Keys
+ * held with Cmd or Ctrl, and non-character keys (Option+arrows), keep Alt.
+ * Elsewhere this does nothing.
+ */
+void plat_set_option_as_alt(te_platform *p, unsigned sides);
 
 #endif

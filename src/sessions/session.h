@@ -93,7 +93,15 @@ uint16_t session_default_port(te_sess_type t);
 #ifdef _WIN32
 #define TE_SERIAL_EXAMPLE "COM3"
 #else
+#ifdef __APPLE__
+#define TE_SERIAL_EXAMPLE "/dev/cu.usbserial-0001"
+#define TE_BREAK_HINT     "Cmd+Option+B"     /* the helper has no keymap: the default send_break */
+#define TE_SERIAL_GLOB    "/dev/cu.*"
+#else
 #define TE_SERIAL_EXAMPLE "/dev/ttyUSB0"
+#define TE_BREAK_HINT     "Ctrl+Shift+Pause"
+#define TE_SERIAL_GLOB    "/dev/ttyUSB* /dev/ttyACM*"
+#endif
 #endif
 
 /* Serial device: an absolute path under /dev/ without ".." (POSIX); COM1 to COM256 (Windows). */

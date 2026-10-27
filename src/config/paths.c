@@ -31,6 +31,22 @@ static te_err exe_dir(char *out, size_t outsz)
     return str_copy(out, outsz, buf);
 }
 
+/* Shipped data next to the binary: <exe dir>/data, or Contents/Resources/data in a macOS .app bundle. */
+static te_err exe_data_dir(char *out, size_t outsz)
+{
+    char dir[TE_PATH_MAX] = { 0 };
+    te_err rc = exe_dir(dir, sizeof dir);
+    if (rc != TE_OK) {
+        return rc;
+    }
+#ifdef __APPLE__
+    if (str_fmt(out, outsz, "%s/../Resources/data", dir) == TE_OK && access(out, R_OK) == 0) {
+        return TE_OK;
+    }
+#endif
+    return str_fmt(out, outsz, "%s/data", dir);
+}
+
 static bool try_path(char *out, size_t outsz, const char *base, const char *rel)
 {
     if (str_fmt(out, outsz, "%s/%s", base, rel) != TE_OK) {
@@ -48,8 +64,7 @@ te_err paths_find_data(const char *rel, char *out, size_t outsz)
     if (paths_config_dir(base, sizeof base) == TE_OK && try_path(out, outsz, base, rel)) {
         return TE_OK;
     }
-    if (exe_dir(base, sizeof base) == TE_OK && str_append(base, sizeof base, "/data") == TE_OK &&
-        try_path(out, outsz, base, rel)) {
+    if (exe_data_dir(base, sizeof base) == TE_OK && try_path(out, outsz, base, rel)) {
         return TE_OK;
     }
     if (try_path(out, outsz, APP_DATADIR, rel)) {
@@ -66,8 +81,8 @@ size_t paths_data_dirs(char dirs[][TE_PATH_MAX], size_t max)
     if (n < max && str_copy(dirs[n], TE_PATH_MAX, APP_DATADIR) == TE_OK) {
         n++;
     }
-    if (n < max && exe_dir(base, sizeof base) == TE_OK &&
-        str_fmt(dirs[n], TE_PATH_MAX, "%s/data", base) == TE_OK && strcmp(dirs[n], APP_DATADIR) != 0) {
+    if (n < max && exe_data_dir(base, sizeof base) == TE_OK && strcmp(base, APP_DATADIR) != 0 &&
+        str_copy(dirs[n], TE_PATH_MAX, base) == TE_OK) {
         n++;
     }
     if (n < max && paths_config_dir(dirs[n], TE_PATH_MAX) == TE_OK) {

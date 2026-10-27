@@ -1,8 +1,16 @@
 #include "util/os.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <limits.h>
+#include <mach-o/dyld.h>
+#include <sys/xattr.h>
+#include <time.h>
+#endif
 
 #include "util/str.h"
 
@@ -33,6 +41,42 @@ te_err os_config_base(char *out, size_t outsz)
     return str_fmt(out, outsz, "%s/.config", home);
 }
 
+#ifdef __APPLE__
+te_err os_self_exe(char *out, size_t outsz)
+{
+    if (out == nullptr || outsz < 2) {
+        return TE_ERR_INVAL;
+    }
+    char raw[PATH_MAX] = { 0 };
+    uint32_t len = (uint32_t)sizeof raw;
+    if (_NSGetExecutablePath(raw, &len) != 0) {
+        return TE_ERR_NOTFOUND;   /* longer than PATH_MAX */
+    }
+    raw[sizeof raw - 1] = '\0';
+    char real[PATH_MAX] = { 0 };
+    if (realpath(raw, real) == nullptr || real[0] != '/') {
+        return TE_ERR_NOTFOUND;
+    }
+    real[sizeof real - 1] = '\0';
+    return str_copy(out, outsz, real);
+}
+
+/* The quarantine attribute browsers set: Gatekeeper then checks the file before
+ * it is run or opened as an app. Format: flags;hex time;agent;event id. */
+void os_mark_from_internet(const char *path)
+{
+    if (path == nullptr || path[0] == '\0') {
+        return;
+    }
+    char value[96] = { 0 };
+    time_t now = time(nullptr);
+    unsigned long long t = now > 0 ? (unsigned long long)now : 0u;
+    if (str_fmt(value, sizeof value, "0081;%08llx;%s;", t, APP_DISPLAY_NAME) != TE_OK) {
+        return;
+    }
+    (void)setxattr(path, "com.apple.quarantine", value, strlen(value), 0, XATTR_NOFOLLOW);
+}
+#else
 te_err os_self_exe(char *out, size_t outsz)
 {
     if (out == nullptr || outsz < 2) {
@@ -54,6 +98,7 @@ void os_mark_from_internet(const char *path)
 {
     (void)path;   /* Mark-of-the-Web is a Windows concept; nothing to do here */
 }
+#endif
 
 void os_harden_process(void)
 {
@@ -71,4 +116,22 @@ bool os_hostname(char *out, size_t outsz)
     }
     out[outsz - 1] = '\0';
     return out[0] != '\0';
+}
+
+bool os_set_nonblock(int fd)
+{
+    int fl = fcntl(fd, F_GETFL);
+    if (fl < 0) {
+        return false;
+    }
+    if (fcntl(fd, F_SETFL, fl | O_NONBLOCK) == 0) {
+        return true;
+    }
+#ifdef __APPLE__
+    if (errno == ENOTTY) {
+        int now = fcntl(fd, F_GETFL);
+        return now >= 0 && (now & O_NONBLOCK) != 0;
+    }
+#endif
+    return false;
 }

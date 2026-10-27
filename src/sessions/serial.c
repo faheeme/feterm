@@ -21,9 +21,11 @@ static bool baud_constant(uint32_t baud, speed_t *out)
         { 50, B50 }, { 75, B75 }, { 110, B110 }, { 134, B134 }, { 150, B150 }, { 200, B200 }, { 300, B300 },
         { 600, B600 }, { 1200, B1200 }, { 1800, B1800 }, { 2400, B2400 }, { 4800, B4800 }, { 9600, B9600 },
         { 19200, B19200 }, { 38400, B38400 }, { 57600, B57600 }, { 115200, B115200 }, { 230400, B230400 },
+#ifdef B460800   /* Linux; macOS sets faster rates through serial_set_custom_baud() */
         { 460800, B460800 }, { 500000, B500000 }, { 576000, B576000 }, { 921600, B921600 },
         { 1000000, B1000000 }, { 1152000, B1152000 }, { 1500000, B1500000 }, { 2000000, B2000000 },
         { 2500000, B2500000 }, { 3000000, B3000000 }, { 3500000, B3500000 }, { 4000000, B4000000 },
+#endif
     };
     for (size_t i = 0; i < TE_ARRAY_LEN(map); i++) {
         if (map[i].baud == baud) {
@@ -45,15 +47,20 @@ static void explain_open_error(const char *dev, int err)
     switch (err) {
     case EACCES:
     case EPERM:
+#ifdef __APPLE__
+        helper_sayf("\x1b[31mPermission denied opening %s.\x1b[0m\r\n"
+                    "Check the device's permissions with: ls -l %s\r\n", dev, dev);
+#else
         helper_sayf("\x1b[31mPermission denied opening %s.\x1b[0m\r\n"
                     "Serial ports belong to the 'dialout' group. Add yourself and log in again:\r\n"
                     "    sudo usermod -aG dialout $USER\r\n", dev);
+#endif
         break;
     case ENOENT:
     case ENODEV:
     case ENXIO:
         helper_sayf("\x1b[31m%s does not exist.\x1b[0m Is the USB serial adapter plugged in? "
-                    "Try ls /dev/ttyUSB* /dev/ttyACM*\r\n", dev);
+                    "Try ls " TE_SERIAL_GLOB "\r\n", dev);
         break;
     case EBUSY:
         helper_sayf("\x1b[31m%s is busy.\x1b[0m Another program is using it.\r\n", dev);
@@ -147,7 +154,7 @@ int serial_helper_main(int argc, char **argv)
     }
     static const char *const flows[] = { "none", "RTS/CTS", "XON/XOFF" };
     static const char parities[] = { 'N', 'E', 'O' };
-    helper_sayf("\x1b[2mConnected to %s at %u %u%c%u, flow control %s. Ctrl+Shift+Pause sends a Break.\x1b[0m\r\n",
+    helper_sayf("\x1b[2mConnected to %s at %u %u%c%u, flow control %s. " TE_BREAK_HINT " sends a Break.\x1b[0m\r\n",
                 argv[0], (unsigned)cfg.baud, (unsigned)cfg.data_bits, parities[cfg.parity], (unsigned)cfg.stop_bits,
                 flows[cfg.flow]);
 

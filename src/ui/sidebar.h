@@ -14,6 +14,7 @@
 
 #include <stdbool.h>
 #include "common.h"
+#include "input/keybind.h"
 #include "platform/platform.h"
 #include "sessions/store.h"
 #include "ui/files.h"
@@ -68,6 +69,7 @@ typedef struct te_sidebar {
     te_menu          menu;
     int              menu_node;         /* -1: empty space */
     te_form          form;
+    char             quick_hint[48];    /* the quick_connect shortcut, for the menu */
     int              form_node;
     char             form_folder[TE_SESS_FOLDER_MAX + 1];
     char             form_name[TE_SESS_NAME_MAX + 1];
@@ -88,6 +90,8 @@ void sidebar_init(te_sidebar *sb, const char *sessions_root, const te_sidebar_ho
 void sidebar_destroy(te_sidebar *sb);
 /* Apply [sidebar] settings. visible is only taken at startup (first_time). */
 void sidebar_configure(te_sidebar *sb, bool visible, bool right, float width_logical, bool first_time);
+/* Shortcut hints in menus follow the keymap (call again after a config reload). */
+void sidebar_set_keymap(te_sidebar *sb, const te_keymap *keys);
 /* Window size and font metrics for this frame; call before input and drawing. */
 void sidebar_layout(te_sidebar *sb, const te_painter *p, float win_w, float win_h);
 /* Width the sidebar takes (the collapsed strip when hidden) and the x where the terminal starts. */

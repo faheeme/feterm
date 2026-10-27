@@ -1158,7 +1158,7 @@ static void open_menu(te_sidebar *sb, int idx, float x, float y, const te_painte
     } else {
         items[n++] = menu_item(M_NEW_SESSION, "New session...", "", rw);
         items[n++] = menu_item(M_NEW_FOLDER, "New folder...", "", rw);
-        items[n++] = menu_item(M_QUICK, "Quick connect...", "Ctrl+Shift+N", true);
+        items[n++] = menu_item(M_QUICK, "Quick connect...", sb->quick_hint, true);
         items[n] = menu_item(M_EXPAND_ALL, "Expand all", "", sb->store.len > 0);
         items[n++].separator_before = true;
         items[n++] = menu_item(M_COLLAPSE_ALL, "Collapse all", "", sb->store.len > 0);
@@ -1759,5 +1759,15 @@ void sidebar_draw(const te_sidebar *sb, const te_painter *p, const te_ui_colors 
         /* Dim everything behind a dialog. */
         ui_rect(p, TE_LAYER_OVERLAY, 0.0f, 0.0f, sb->win_w, sb->win_h, 0x000000, 0.35f);
         form_draw(&sb->form, p, c);
+    }
+}
+
+void sidebar_set_keymap(te_sidebar *sb, const te_keymap *keys)
+{
+    if (sb == nullptr) {
+        return;
+    }
+    if (keys == nullptr || keymap_describe(keys, TE_ACT_QUICK_CONNECT, sb->quick_hint, sizeof sb->quick_hint) != TE_OK) {
+        sb->quick_hint[0] = '\0';   /* unbound: no hint */
     }
 }
