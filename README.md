@@ -1,5 +1,7 @@
 # FeTerm
 
+**Website:** https://faheeme.gitlab.io/feterm-site/
+
 A GPU-accelerated terminal emulator in C23 that runs natively on Wayland and X11 through SDL3,
 and on Windows 10 (1809) and 11.
 The name lives in two Makefile variables: `NAME` (binary, config and data directory, app-id)
