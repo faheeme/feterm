@@ -191,6 +191,25 @@ static void test_session_store(void)
     CHECK(store_find_session(&st, "DC/Core", "core-sw1") >= 0);
     CHECK(store_move_session(&st, "DC/Core", "core-sw1", "Lab") == TE_OK);
     CHECK(store_find_session(&st, "Lab", "core-sw1") >= 0 && store_find_session(&st, "DC/Core", "core-sw1") < 0);
+    /* Moving onto a name that already exists is refused and replaces nothing
+       (renameat2 RENAME_NOREPLACE; a raw system call on older musl). */
+    {
+        te_session dup;
+        session_defaults(&dup, TE_SESS_SSH);
+        (void)str_copy(dup.name, sizeof dup.name, "core-sw1");
+        (void)str_copy(dup.folder, sizeof dup.folder, "DC/Core");
+        (void)str_copy(dup.host, sizeof dup.host, "10.9.9.9");
+        CHECK(store_save_session(&st, &dup, nullptr, nullptr) == TE_OK);
+        CHECK(store_move_session(&st, "DC/Core", "core-sw1", "Lab") == TE_ERR_EXISTS);
+        int a = store_find_session(&st, "Lab", "core-sw1");
+        int b = store_find_session(&st, "DC/Core", "core-sw1");
+        CHECK(a >= 0 && b >= 0);
+        if (a >= 0 && b >= 0) {
+            CHECK(strcmp(st.nodes[a].sess->host, "10.0.0.1") == 0);
+            CHECK(strcmp(st.nodes[b].sess->host, "10.9.9.9") == 0);
+        }
+        CHECK(store_delete_session(&st, "DC/Core", "core-sw1") == TE_OK);
+    }
 
     /* Edit with a rename replaces the old file. */
     si = store_find_session(&st, "Lab", "core-sw1");
@@ -248,6 +267,17 @@ static void test_session_store(void)
 #endif
 
     store_close(&st);
+
+#ifndef _WIN32
+    /* A fresh account may have no ~/.config: every missing folder is made. */
+    char deep[320] = { 0 };
+    CHECK(str_fmt(deep, sizeof deep, "%s/home/.config/feterm/sessions", root) == TE_OK);
+    te_store st2;
+    CHECK(store_open(&st2, deep) == TE_OK);
+    struct stat dsb = { 0 };
+    CHECK(stat(deep, &dsb) == 0 && S_ISDIR(dsb.st_mode) && (dsb.st_mode & 077) == 0);
+    store_close(&st2);
+#endif
     rm_tree(root);
 }
 

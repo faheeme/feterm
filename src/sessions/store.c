@@ -399,9 +399,13 @@ te_err store_open(te_store *st, const char *root)
     if (rc != TE_OK) {
         return rc;
     }
-    /* The config directory itself may not exist yet. */
     char parent[TE_PATH_MAX] = { 0 };
-    (void)str_copy(parent, sizeof parent, root);
+    rc = str_copy(parent, sizeof parent, root);
+    if (rc != TE_OK) {
+        return rc;
+    }
+#ifdef _WIN32
+    /* %APPDATA% always exists; only the config directory may be missing. */
     char *slash = strrchr(parent, '/');
     if (slash != nullptr && slash != parent) {
         *slash = '\0';
@@ -409,6 +413,20 @@ te_err store_open(te_store *st, const char *root)
             return errno_to_err(errno);
         }
     }
+#else
+    /* The config directory, and even ~/.config on a fresh account, may not
+       exist yet: create each missing folder on the way, like mkdir -p. */
+    for (char *p = parent + 1; *p != '\0'; p++) {
+        if (*p != '/') {
+            continue;
+        }
+        *p = '\0';
+        if (mkdir(parent, 0700) != 0 && errno != EEXIST) {
+            return errno_to_err(errno);
+        }
+        *p = '/';
+    }
+#endif
     if (mkdir(root, 0700) != 0 && errno != EEXIST) {
         return errno_to_err(errno);
     }

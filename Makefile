@@ -31,13 +31,16 @@ WERROR  ?= -Werror
 # on ARM64); other CPUs build without it.
 TARGET  := $(shell $(CC) -dumpmachine)
 CFPROT  := $(if $(filter x86_64-% i%86-%,$(TARGET)),-fcf-protection,$(if $(filter aarch64-%,$(TARGET)),-mbranch-protection=standard))
-HARDEN  := -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection \
+# -U first: some toolchains (Alpine's gcc) predefine a lower level.
+HARDEN  := -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection \
            $(CFPROT) -fPIE -fno-strict-overflow -fno-delete-null-pointer-checks
 OPT     ?= -O2 -g
 
 # Windows (MinGW-w64, usually cross-compiled: make CC=x86_64-w64-mingw32-gcc).
 # Files ending in _win.c replace the POSIX-only ones listed here.
 WINDOWS    := $(if $(findstring mingw,$(TARGET)),1)
+# musl (Alpine Linux): compat_musl.h supplies the Linux calls musl lacks.
+MUSL       := $(if $(findstring musl,$(TARGET)),1)
 # macOS (clang 18+ for C23, e.g. Homebrew's llvm). Files ending in _mac.c
 # replace the Linux-only ones listed here.
 MACOS      := $(if $(findstring darwin,$(TARGET)),1)
@@ -87,6 +90,9 @@ EXCLUDE  := $(WIN_ONLY) $(LINUX_ONLY)
 else
 LDFLAGS  += -pie -Wl,-z,relro,-z,now,-z,noexecstack,--as-needed
 EXCLUDE  := $(WIN_ONLY) $(MAC_ONLY)
+ifdef MUSL
+CPPFLAGS += -include src/util/compat_musl.h
+endif
 endif
 OS_SRC   := $(filter-out $(EXCLUDE),$(wildcard src/*.c src/*/*.c))
 CFLAGS   += -std=c23 $(WARN) $(HARDEN) $(OPT) $(shell $(PKG_CONFIG) --cflags $(PKGS))
@@ -148,6 +154,9 @@ TEST_SRC := $(filter-out $(EXCLUDE),$(wildcard src/util/*.c src/config/*.c src/v
 ifdef WINDOWS
 TEST_SAN ?=
 TEST_RUN ?= $(if $(filter Windows_NT,$(OS)),,WINEDEBUG=-all wine)
+else ifdef MUSL
+# Alpine's gcc ships no sanitizer runtimes; UBSan in trap mode needs none.
+TEST_SAN ?= -fsanitize=undefined -fsanitize-trap=undefined
 else
 TEST_SAN ?= -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 endif
