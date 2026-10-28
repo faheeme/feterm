@@ -5,7 +5,7 @@ Maintainer: Faheem Essack <faheem.essack@gmail.com>
 Build-Depends: debhelper-compat (= 13), pkgconf, libsdl3-dev, libpcre2-dev,
  libfreetype-dev, libfontconfig-dev, libgles-dev
 Standards-Version: 4.7.0
-Homepage: https://gitlab.com/faheeme/feterm
+Homepage: https://faheeme.gitlab.io/feterm-site/
 Rules-Requires-Root: no
 
 Package: feterm
