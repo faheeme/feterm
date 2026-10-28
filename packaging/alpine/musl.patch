@@ -1,0 +1,301 @@
+From a38ec99bf8326d8cdd2cb8847114434431249f73 Mon Sep 17 00:00:00 2001
+From: Faheem Essack <faheem.essack@gmail.com>
+Date: Wed, 28 Oct 2026 13:54:37 +0200
+Subject: [PATCH] Build and run on musl (Alpine Linux)
+
+- compat_musl.h, force-included for *-musl targets: close_range() through
+  the system call with a bounded close() loop on old kernels, and
+  renameat2() for musl before 1.2.6 through the system call, with no
+  non-atomic fallback for RENAME_NOREPLACE.
+- serial_baud.c: take TCGETS2/TCSETS2 from <asm/ioctls.h> (musl's
+  <sys/ioctl.h> doesn't), and pass them to musl's int-typed ioctl() by
+  copying the bits instead of an out-of-range conversion.
+- Makefile: -U_FORTIFY_SOURCE before -D (Alpine's gcc predefines level 2);
+  tests use UBSan in trap mode on musl, which has no sanitizer runtimes.
+- Session store: create every missing parent folder, so a fresh account
+  without ~/.config gets a working session manager (POSIX; Windows is
+  unchanged since %APPDATA% always exists).
+- Tests: moving a session onto an existing name is refused and replaces
+  nothing; a missing ~/.config is created with mode 0700.
+
+Builds with -Werror and passes all 1018 tests on Alpine 3.23, 3.24 and
+edge, and on Fedora with ASan + UBSan.
+---
+ Makefile                   | 11 +++++-
+ src/sessions/serial_baud.c | 30 ++++++++++++++--
+ src/sessions/store.c       | 22 ++++++++++--
+ src/util/compat_musl.h     | 74 ++++++++++++++++++++++++++++++++++++++
+ tests/test_sessions.inc    | 30 ++++++++++++++++
+ 5 files changed, 162 insertions(+), 5 deletions(-)
+ create mode 100644 src/util/compat_musl.h
+
+diff --git a/Makefile b/Makefile
+index a8b5b67..747945b 100644
+--- a/Makefile
++++ b/Makefile
+@@ -31,13 +31,16 @@ WERROR  ?= -Werror
+ # on ARM64); other CPUs build without it.
+ TARGET  := $(shell $(CC) -dumpmachine)
+ CFPROT  := $(if $(filter x86_64-% i%86-%,$(TARGET)),-fcf-protection,$(if $(filter aarch64-%,$(TARGET)),-mbranch-protection=standard))
+-HARDEN  := -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection \
++# -U first: some toolchains (Alpine's gcc) predefine a lower level.
++HARDEN  := -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3 -fstack-protector-strong -fstack-clash-protection \
+            $(CFPROT) -fPIE -fno-strict-overflow -fno-delete-null-pointer-checks
+ OPT     ?= -O2 -g
+ 
+ # Windows (MinGW-w64, usually cross-compiled: make CC=x86_64-w64-mingw32-gcc).
+ # Files ending in _win.c replace the POSIX-only ones listed here.
+ WINDOWS    := $(if $(findstring mingw,$(TARGET)),1)
++# musl (Alpine Linux): compat_musl.h supplies the Linux calls musl lacks.
++MUSL       := $(if $(findstring musl,$(TARGET)),1)
+ # macOS (clang 18+ for C23, e.g. Homebrew's llvm). Files ending in _mac.c
+ # replace the Linux-only ones listed here.
+ MACOS      := $(if $(findstring darwin,$(TARGET)),1)
+@@ -87,6 +90,9 @@ EXCLUDE  := $(WIN_ONLY) $(LINUX_ONLY)
+ else
+ LDFLAGS  += -pie -Wl,-z,relro,-z,now,-z,noexecstack,--as-needed
+ EXCLUDE  := $(WIN_ONLY) $(MAC_ONLY)
++ifdef MUSL
++CPPFLAGS += -include src/util/compat_musl.h
++endif
+ endif
+ OS_SRC   := $(filter-out $(EXCLUDE),$(wildcard src/*.c src/*/*.c))
+ CFLAGS   += -std=c23 $(WARN) $(HARDEN) $(OPT) $(shell $(PKG_CONFIG) --cflags $(PKGS))
+@@ -148,6 +154,9 @@ TEST_SRC := $(filter-out $(EXCLUDE),$(wildcard src/util/*.c src/config/*.c src/v
+ ifdef WINDOWS
+ TEST_SAN ?=
+ TEST_RUN ?= $(if $(filter Windows_NT,$(OS)),,WINEDEBUG=-all wine)
++else ifdef MUSL
++# Alpine's gcc ships no sanitizer runtimes; UBSan in trap mode needs none.
++TEST_SAN ?= -fsanitize=undefined -fsanitize-trap=undefined
+ else
+ TEST_SAN ?= -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
+ endif
+diff --git a/src/sessions/serial_baud.c b/src/sessions/serial_baud.c
+index a1b6429..f380edd 100644
+--- a/src/sessions/serial_baud.c
++++ b/src/sessions/serial_baud.c
+@@ -2,17 +2,43 @@
+  * Arbitrary serial speeds through Linux termios2 (BOTHER). This lives in its
+  * own file because <asm/termbits.h> and glibc's <termios.h> define the same
+  * names and cannot be included together.
++ *
++ * glibc's <sys/ioctl.h> brings in the kernel's request numbers; musl's does
++ * not, so <asm/ioctls.h> is included for TCGETS2/TCSETS2 on both.
+  */
+ #include <asm/termbits.h>
++#include <asm/ioctls.h>
+ #include <stdint.h>
++#include <string.h>
+ #include <sys/ioctl.h>
+ 
+ int serial_set_custom_baud(int fd, uint32_t baud);
+ 
++#ifdef __GLIBC__
++typedef unsigned long ioctl_req;
++#else
++/* musl declares ioctl(int, int, ...). The kernel reads the request as a
++   32-bit pattern, so the bits are copied rather than converted: TCGETS2 is
++   above INT_MAX, and an out-of-range conversion to int is not portable. */
++typedef int32_t ioctl_req;
++#endif
++
++static ioctl_req req(uint32_t request)
++{
++    ioctl_req r = 0;
++    static_assert(sizeof r >= sizeof request, "ioctl request type too small");
++#ifdef __GLIBC__
++    r = request;
++#else
++    memcpy(&r, &request, sizeof request);
++#endif
++    return r;
++}
++
+ int serial_set_custom_baud(int fd, uint32_t baud)
+ {
+     struct termios2 t = { 0 };
+-    if (ioctl(fd, TCGETS2, &t) != 0) {
++    if (ioctl(fd, req(TCGETS2), &t) != 0) {
+         return -1;
+     }
+     t.c_cflag &= ~(tcflag_t)CBAUD;
+@@ -21,5 +47,5 @@ int serial_set_custom_baud(int fd, uint32_t baud)
+     t.c_cflag |= (tcflag_t)BOTHER << IBSHIFT;
+     t.c_ispeed = baud;
+     t.c_ospeed = baud;
+-    return ioctl(fd, TCSETS2, &t);
++    return ioctl(fd, req(TCSETS2), &t);
+ }
+diff --git a/src/sessions/store.c b/src/sessions/store.c
+index 78ed9d8..45b264a 100644
+--- a/src/sessions/store.c
++++ b/src/sessions/store.c
+@@ -399,9 +399,13 @@ te_err store_open(te_store *st, const char *root)
+     if (rc != TE_OK) {
+         return rc;
+     }
+-    /* The config directory itself may not exist yet. */
+     char parent[TE_PATH_MAX] = { 0 };
+-    (void)str_copy(parent, sizeof parent, root);
++    rc = str_copy(parent, sizeof parent, root);
++    if (rc != TE_OK) {
++        return rc;
++    }
++#ifdef _WIN32
++    /* %APPDATA% always exists; only the config directory may be missing. */
+     char *slash = strrchr(parent, '/');
+     if (slash != nullptr && slash != parent) {
+         *slash = '\0';
+@@ -409,6 +413,20 @@ te_err store_open(te_store *st, const char *root)
+             return errno_to_err(errno);
+         }
+     }
++#else
++    /* The config directory, and even ~/.config on a fresh account, may not
++       exist yet: create each missing folder on the way, like mkdir -p. */
++    for (char *p = parent + 1; *p != '\0'; p++) {
++        if (*p != '/') {
++            continue;
++        }
++        *p = '\0';
++        if (mkdir(parent, 0700) != 0 && errno != EEXIST) {
++            return errno_to_err(errno);
++        }
++        *p = '/';
++    }
++#endif
+     if (mkdir(root, 0700) != 0 && errno != EEXIST) {
+         return errno_to_err(errno);
+     }
+diff --git a/src/util/compat_musl.h b/src/util/compat_musl.h
+new file mode 100644
+index 0000000..99afc17
+--- /dev/null
++++ b/src/util/compat_musl.h
+@@ -0,0 +1,74 @@
++/*
++ * Linux calls the shared code uses that musl (Alpine Linux) does not provide,
++ * for musl builds only (the Makefile force-includes this file when the
++ * compiler targets *-musl; glibc, Windows and macOS never see it).
++ *
++ * The system headers are included first, so a later musl that declares
++ * these functions itself cannot clash with the macros below.
++ */
++#ifndef TE_COMPAT_MUSL_H
++#define TE_COMPAT_MUSL_H
++
++#include <errno.h>
++#include <stdio.h>
++#include <sys/syscall.h>
++#include <unistd.h>
++
++/*
++ * Only called in a freshly forked child, just before exec: syscall() and
++ * close() are async-signal-safe. Kernels before 5.9 have no close_range and
++ * answer ENOSYS; then each descriptor is closed in turn. Descriptors above
++ * 65535 would only exist after raising the limit on purpose; everything
++ * FeTerm opens is close-on-exec anyway.
++ */
++static inline int te_musl_close_range(unsigned first, unsigned last, int flags)
++{
++    if (flags != 0 || first > last) {
++        errno = EINVAL;
++        return -1;
++    }
++#ifdef SYS_close_range
++    if (syscall(SYS_close_range, first, last, 0u) == 0) {
++        return 0;
++    }
++    if (errno != ENOSYS) {
++        return -1;
++    }
++#endif
++    int table = getdtablesize();
++    unsigned top = table > 0 ? (unsigned)table : 256u;
++    if (top > 65536u) {
++        top = 65536u;
++    }
++    for (unsigned fd = first; fd < top && fd <= last; fd++) {
++        (void)close((int)fd);
++    }
++    return 0;
++}
++#define close_range(first, last, flags) te_musl_close_range((first), (last), (flags))
++
++/*
++ * musl added renameat2() in 1.2.6 (Alpine 3.24); older releases get the raw
++ * system call. There is deliberately no fallback to rename-then-check: callers
++ * rely on RENAME_NOREPLACE being atomic, so a kernel or filesystem without it
++ * fails (ENOSYS/EINVAL) instead of possibly replacing a file.
++ */
++#ifndef RENAME_NOREPLACE
++#define RENAME_NOREPLACE (1u << 0)
++
++static inline int te_musl_renameat2(int olddir, const char *oldp, int newdir, const char *newp, unsigned flags)
++{
++#ifdef SYS_renameat2
++    return (int)syscall(SYS_renameat2, olddir, oldp, newdir, newp, flags);
++#else
++    if (flags == 0) {
++        return renameat(olddir, oldp, newdir, newp);
++    }
++    errno = ENOSYS;
++    return -1;
++#endif
++}
++#define renameat2(od, op, nd, np, fl) te_musl_renameat2((od), (op), (nd), (np), (fl))
++#endif
++
++#endif
+diff --git a/tests/test_sessions.inc b/tests/test_sessions.inc
+index ffc52eb..44025cc 100644
+--- a/tests/test_sessions.inc
++++ b/tests/test_sessions.inc
+@@ -191,6 +191,25 @@ static void test_session_store(void)
+     CHECK(store_find_session(&st, "DC/Core", "core-sw1") >= 0);
+     CHECK(store_move_session(&st, "DC/Core", "core-sw1", "Lab") == TE_OK);
+     CHECK(store_find_session(&st, "Lab", "core-sw1") >= 0 && store_find_session(&st, "DC/Core", "core-sw1") < 0);
++    /* Moving onto a name that already exists is refused and replaces nothing
++       (renameat2 RENAME_NOREPLACE; a raw system call on older musl). */
++    {
++        te_session dup;
++        session_defaults(&dup, TE_SESS_SSH);
++        (void)str_copy(dup.name, sizeof dup.name, "core-sw1");
++        (void)str_copy(dup.folder, sizeof dup.folder, "DC/Core");
++        (void)str_copy(dup.host, sizeof dup.host, "10.9.9.9");
++        CHECK(store_save_session(&st, &dup, nullptr, nullptr) == TE_OK);
++        CHECK(store_move_session(&st, "DC/Core", "core-sw1", "Lab") == TE_ERR_EXISTS);
++        int a = store_find_session(&st, "Lab", "core-sw1");
++        int b = store_find_session(&st, "DC/Core", "core-sw1");
++        CHECK(a >= 0 && b >= 0);
++        if (a >= 0 && b >= 0) {
++            CHECK(strcmp(st.nodes[a].sess->host, "10.0.0.1") == 0);
++            CHECK(strcmp(st.nodes[b].sess->host, "10.9.9.9") == 0);
++        }
++        CHECK(store_delete_session(&st, "DC/Core", "core-sw1") == TE_OK);
++    }
+ 
+     /* Edit with a rename replaces the old file. */
+     si = store_find_session(&st, "Lab", "core-sw1");
+@@ -248,6 +267,17 @@ static void test_session_store(void)
+ #endif
+ 
+     store_close(&st);
++
++#ifndef _WIN32
++    /* A fresh account may have no ~/.config: every missing folder is made. */
++    char deep[320] = { 0 };
++    CHECK(str_fmt(deep, sizeof deep, "%s/home/.config/feterm/sessions", root) == TE_OK);
++    te_store st2;
++    CHECK(store_open(&st2, deep) == TE_OK);
++    struct stat dsb = { 0 };
++    CHECK(stat(deep, &dsb) == 0 && S_ISDIR(dsb.st_mode) && (dsb.st_mode & 077) == 0);
++    store_close(&st2);
++#endif
+     rm_tree(root);
+ }
+ 
+-- 
+2.52.0
+

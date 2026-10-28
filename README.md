@@ -62,6 +62,23 @@ sudo apt remove feterm
 sudo add-apt-repository --remove ppa:faheeme/feterm
 ```
 
+### Alpine Linux
+
+FeTerm has its own signed apk repository for Alpine 3.23, 3.24 and edge (x86_64 and
+aarch64). As root:
+
+```sh
+wget -O /etc/apk/keys/feterm-20261028.rsa.pub https://faheeme.gitlab.io/feterm-apk/keys/feterm-20261028.rsa.pub
+sha256sum /etc/apk/keys/feterm-20261028.rsa.pub
+echo "https://faheeme.gitlab.io/feterm-apk/v$(cut -d. -f1,2 /etc/alpine-release)/feterm" >> /etc/apk/repositories
+apk update && apk add feterm
+```
+
+The key's SHA-256 fingerprint must be
+`fb1f9164296b37022329269b9edb8eb76b43581d4b12d305d606a4a9e3563ae1`. On edge, use
+`https://faheeme.gitlab.io/feterm-apk/edge/feterm` as the repository. Updates arrive with
+`apk upgrade`. Details and removal: <https://faheeme.gitlab.io/feterm-apk/>.
+
 ### Other distributions
 
 Build it from source as described below.

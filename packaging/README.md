@@ -5,6 +5,7 @@
 | `arch/` | Arch, Omarchy, Manjaro | AUR |
 | `rpm/` | Fedora, Rocky / Alma / RHEL 10 | COPR |
 | `debian/` | Ubuntu 26.04 and newer | Launchpad PPA |
+| `alpine/` | Alpine 3.23, 3.24, edge (x86_64, aarch64) | Own signed apk repo on GitLab Pages |
 | `windows/` | Windows 10 (1809) and 11, x64 | GitLab release files, winget |
 
 The Linux packages all download the tag's source archive from GitLab:
@@ -43,9 +44,11 @@ a user's build.
 5. **Windows:** `packaging/windows/build.sh`, then attach `dist/feterm-X.Y.Z-windows-x64.zip`,
    `dist/feterm-X.Y.Z-windows-x64-setup.exe` and `dist/SHA256SUMS` to the GitLab release and
    update winget (see *Windows* below).
+6. **Alpine:** set `pkgver=X.Y.Z`, `pkgrel=0` in `alpine/APKBUILD` (and drop patches the
+   release contains), then build, sign and publish the repo (see *Alpine* below).
 
 A fix to the packaging alone (no code change) keeps the version and bumps the package
-release instead: `pkgrel=2`, `Release: 2`, or `-1~ppa2`.
+release instead: `pkgrel=2`, `Release: 2`, `-1~ppa2`, or Alpine `pkgrel=1`.
 
 ## PPA uploads
 
@@ -189,3 +192,34 @@ installer until enough people have run it. Report a false positive at
 <https://www.microsoft.com/en-us/wdsi/filesubmission>. Signing (e.g. Azure Trusted Signing)
 removes both.
 
+## Alpine
+
+Alpine packages are not in Alpine's own repositories. FeTerm publishes a signed apk
+repository instead, from the separate project
+[faheeme/feterm-apk](https://gitlab.com/faheeme/feterm-apk) at
+<https://faheeme.gitlab.io/feterm-apk/>. Its README has the complete step-by-step guide
+(one-time setup, releases, new Alpine versions, key rotation).
+
+- `alpine/APKBUILD`: the package. SDL3 loads its video backends and GL drivers at run time,
+  so `depends=` lists them. Patches go next to it, listed in `source=`.
+- `alpine/build-repo.sh`: builds, tests, signs and smoke-tests every Alpine release × arch in
+  throwaway containers, then copies the result into a feterm-apk checkout (it never pushes).
+  `keygen`, `binfmt` (QEMU for aarch64, after each reboot) and `checksum` are its other
+  commands.
+- `alpine/container.sh`: the part that runs inside those containers, as an unprivileged
+  `builder` user.
+
+The private signing key lives only in `~/.config/feterm-apk/` (mode 600), outside every
+repository. Its SHA-256 fingerprint,
+`fb1f9164296b37022329269b9edb8eb76b43581d4b12d305d606a4a9e3563ae1`, is published in the
+top-level README, on the website's download page and on the repo's own page, so users can
+cross-check it.
+
+Release day:
+
+```sh
+packaging/alpine/build-repo.sh binfmt          # once per boot, for aarch64
+packaging/alpine/build-repo.sh checksum        # after changing pkgver or a patch
+packaging/alpine/build-repo.sh build --repo ~/bin/feterm-apk --key ~/.config/feterm-apk/feterm-20261028.rsa
+cd ~/bin/feterm-apk && git add -A && git commit -m "feterm X.Y.Z" && git push
+```
