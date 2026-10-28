@@ -3,8 +3,8 @@ Version:        0.5.2
 Release:        1%{?dist}
 Summary:        Modern terminal emulator with network-device syntax highlighting
 License:        MIT
-URL:            https://gitlab.com/faheeme/feterm
-Source0:        %{url}/-/archive/v%{version}/%{name}-v%{version}.tar.gz
+URL:            https://faheeme.gitlab.io/feterm-site/
+Source0:        https://gitlab.com/faheeme/feterm/-/archive/v%{version}/%{name}-v%{version}.tar.gz
 
 BuildRequires:  gcc make pkgconf-pkg-config
 BuildRequires:  pkgconfig(sdl3) pkgconfig(libpcre2-8) pkgconfig(freetype2)

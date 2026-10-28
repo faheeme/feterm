@@ -4,13 +4,13 @@ pkgver=0.5.2
 pkgrel=1
 pkgdesc="Modern terminal emulator with PCRE2 syntax highlighting for Cisco, Arista and Juniper"
 arch=('x86_64' 'aarch64')
-url="https://gitlab.com/faheeme/feterm"
+url="https://faheeme.gitlab.io/feterm-site/"
 license=('MIT')
 depends=('sdl3' 'pcre2' 'freetype2' 'fontconfig' 'libglvnd' 'hicolor-icon-theme')
 optdepends=('openssh: SSH sessions and SFTP/SCP file explorer'
             'xdg-utils: open URLs'
             'libnotify: desktop notifications')
-source=("$pkgname-$pkgver.tar.gz::$url/-/archive/v$pkgver/$pkgname-v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://gitlab.com/faheeme/feterm/-/archive/v$pkgver/$pkgname-v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {

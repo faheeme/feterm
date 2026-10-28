@@ -18,6 +18,7 @@
 #define AppName    "FeTerm"
 #define AppExe     "feterm.exe"
 #define AppURL     "https://gitlab.com/faheeme/feterm"
+#define AppHome    "https://faheeme.gitlab.io/feterm-site/"
 
 [Setup]
 ; Never change AppId: Windows recognises installed versions by it.
@@ -26,7 +27,7 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=Faheem Essack
-AppPublisherURL={#AppURL}
+AppPublisherURL={#AppHome}
 AppSupportURL={#AppURL}/-/issues
 AppUpdatesURL={#AppURL}/-/releases
 DefaultDirName={autopf}\{#AppName}

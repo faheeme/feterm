@@ -76,7 +76,7 @@ PackageLocale: en-US
 Publisher: Faheem Essack
 PublisherUrl: https://gitlab.com/faheeme
 PackageName: FeTerm
-PackageUrl: https://gitlab.com/faheeme/feterm
+PackageUrl: https://faheeme.gitlab.io/feterm-site/
 License: MIT
 LicenseUrl: https://gitlab.com/faheeme/feterm/-/blob/main/LICENSE
 ShortDescription: Terminal emulator with syntax highlighting for Cisco, Arista and Juniper
