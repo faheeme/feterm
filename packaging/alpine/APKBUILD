@@ -1,0 +1,60 @@
+# Maintainer: Faheem Essack <faheem.essack@gmail.com>
+#
+# Built and signed by packaging/alpine/build-repo.sh for the FeTerm apk
+# repository (https://faheeme.gitlab.io/feterm-apk/), not for aports.
+pkgname=feterm
+pkgver=0.5.2
+pkgrel=0
+pkgdesc="Modern terminal emulator with PCRE2 syntax highlighting for Cisco, Arista and Juniper"
+url="https://faheeme.gitlab.io/feterm-site/"
+arch="x86_64 aarch64"
+license="MIT"
+# SDL3 loads its video backends, EGL and the GL drivers at run time, so they
+# are listed here; the libraries FeTerm links directly come from so: autodeps.
+depends="
+	font-jetbrains-mono
+	libdecor
+	libx11
+	libxcursor
+	libxext
+	libxfixes
+	libxi
+	libxkbcommon
+	libxrandr
+	mesa-dri-gallium
+	mesa-egl
+	wayland-libs-client
+	wayland-libs-cursor
+	wayland-libs-egl
+	"
+makedepends="
+	fontconfig-dev
+	freetype-dev
+	linux-headers
+	mesa-dev
+	pcre2-dev
+	sdl3-dev
+	"
+subpackages="$pkgname-doc"
+source="$pkgname-$pkgver.tar.gz::https://gitlab.com/faheeme/feterm/-/archive/v$pkgver/feterm-v$pkgver.tar.gz
+	musl.patch
+	"
+builddir="$srcdir/feterm-v$pkgver"
+
+build() {
+	make PREFIX=/usr WERROR=
+}
+
+check() {
+	make WERROR= test
+}
+
+package() {
+	make PREFIX=/usr DESTDIR="$pkgdir" install
+	install -Dm644 LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+sha512sums="
+211660eb5387679556f3ecf7a137528f5585a213697580ac8d2e42a323ee7a231508392f884a9d669d46a09a6ab7f86ce027a9d9c0f219537bfb178dec1662f0  feterm-0.5.2.tar.gz
+e2f4ee708c7a4cedb74ee18a679d14d632808dda69db90665ca29cfb03565f9b906969ab2582db55e0a51c55e7554fd39d5d3b3a0a45ce7aeb9510e9d1d614e6  musl.patch
+"
