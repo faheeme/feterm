@@ -2,7 +2,7 @@
 #ifndef TE_APP_NAME_H
 #define TE_APP_NAME_H
 
-/* APP_NAME: binary, config and data directories. APP_DISPLAY_NAME: shown to users. */
+/* APP_NAME: binary, and config and data directories outside Windows. APP_DISPLAY_NAME: shown to users. */
 #define APP_NAME          "@NAME@"
 #define APP_DISPLAY_NAME  "@DISPLAY_NAME@"
 #define APP_VERSION       "@VERSION@"
@@ -10,5 +10,14 @@
 #define APP_DATADIR       "@DATADIR@"
 #define APP_AUTHOR        "@AUTHOR@"
 #define APP_EMAIL         "@EMAIL@"
+
+/* APP_DIR_NAME: FeTerm's own folder under the config and data bases. Windows
+ * users see these folders in Explorer (%APPDATA%\FeTerm), so it uses the
+ * display name there; elsewhere the program name (~/.config/feterm). */
+#ifdef _WIN32
+#define APP_DIR_NAME      APP_DISPLAY_NAME
+#else
+#define APP_DIR_NAME      APP_NAME
+#endif
 
 #endif

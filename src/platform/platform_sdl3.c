@@ -12,6 +12,7 @@
 #include "platform/icon_data.h"
 #include "util/log.h"
 #include "util/mem.h"
+#include "util/os.h"
 #include "util/str.h"
 
 #define TE_ICON_MAX 512   /* largest embedded icon side we accept */
@@ -33,6 +34,9 @@ struct te_platform {
 
     te_fdwatch    *watch;          /* fds (POSIX) or HANDLEs (Windows) */
     unsigned       option_as_alt;  /* macOS: bit 0 left, bit 1 right Option is Alt */
+#ifdef _WIN32
+    uint32_t       primary_clip;   /* clipboard serial when the primary selection was last set */
+#endif
 };
 
 /* Copies one embedded icon image into a new surface. Returns nullptr on failure. */
@@ -702,15 +706,35 @@ char *plat_clipboard_get(te_platform *p)
 
 void plat_primary_set(te_platform *p, const char *utf8)
 {
-    (void)p;
     if (utf8 != nullptr) {
         (void)SDL_SetPrimarySelectionText(utf8);
+#ifdef _WIN32
+        if (p != nullptr) {
+            p->primary_clip = os_clipboard_serial();
+        }
+#endif
     }
+#ifndef _WIN32
+    (void)p;
+#endif
 }
 
 char *plat_primary_get(te_platform *p)
 {
+#ifdef _WIN32
+    /* Windows has no primary selection: SDL keeps one that only FeTerm writes,
+     * so text copied in another program would never reach middle-click. Paste
+     * whichever is newer: if the clipboard changed after the last selection
+     * here, it holds what the user copied most recently. */
+    if (p != nullptr && os_clipboard_serial() != p->primary_clip) {
+        char *clip = take_sdl_string(SDL_GetClipboardText());
+        if (clip != nullptr) {
+            return clip;   /* no text on the clipboard (e.g. an image): use the selection */
+        }
+    }
+#else
     (void)p;
+#endif
     return take_sdl_string(SDL_GetPrimarySelectionText());
 }
 

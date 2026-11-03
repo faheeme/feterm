@@ -2433,6 +2433,7 @@ static void macos_launch_env(void)
 int main(int argc, char **argv)
 {
     os_harden_process();   /* drop the current dir from the DLL/exe search order (Windows) */
+    paths_fix_dir_case();  /* Windows: %APPDATA%\feterm from older releases becomes FeTerm */
 #ifndef _WIN32
     /* Helper modes: the built-in Telnet and serial clients run inside a pane
      * (on Windows they are feterm-helper.exe, a console program). */
@@ -2531,7 +2532,7 @@ int main(int argc, char **argv)
         char base[TE_PATH_MAX] = { 0 };
         char app_dir[TE_PATH_MAX] = { 0 };
         if (os_local_data_base(base, sizeof base) != TE_OK ||
-            str_fmt(app_dir, sizeof app_dir, "%s/%s", base, APP_NAME) != TE_OK ||
+            str_fmt(app_dir, sizeof app_dir, "%s/%s", base, APP_DIR_NAME) != TE_OK ||
             (mkdir(app_dir, 0700) != 0 && errno != EEXIST) ||
             str_fmt(a.edit_root, sizeof a.edit_root, "%s/edit", app_dir) != TE_OK ||
             (mkdir(a.edit_root, 0700) != 0 && errno != EEXIST)) {

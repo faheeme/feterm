@@ -117,6 +117,101 @@ void os_mark_from_internet(const char *path)
     CloseHandle(h);
 }
 
+/* a + b in a new buffer, or nullptr. */
+static wchar_t *wcs_join(const wchar_t *a, size_t alen, const wchar_t *b)
+{
+    size_t blen = wcslen(b);
+    size_t total = 0;
+    if (ckd_add(&total, alen, blen) || ckd_add(&total, total, (size_t)1)) {
+        return nullptr;
+    }
+    wchar_t *r = te_calloc(total, sizeof *r);
+    if (r != nullptr) {
+        memcpy(r, a, alen * sizeof *r);
+        memcpy(r + alen, b, blen * sizeof *r);
+        r[total - 1] = L'\0';
+    }
+    return r;
+}
+
+/* The real directory entry for w (no wildcards). false if missing. */
+static bool find_entry(const wchar_t *w, WIN32_FIND_DATAW *fd)
+{
+    HANDLE h = FindFirstFileW(w, fd);
+    if (h == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    FindClose(h);
+    fd->cFileName[MAX_PATH - 1] = L'\0';
+    return true;
+}
+
+/* A real folder: not a file, and not a junction or link (renaming one of those
+ * would not move what it points at). */
+static bool plain_dir(const WIN32_FIND_DATAW *fd)
+{
+    return (fd->dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+           (fd->dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0;
+}
+
+void os_fix_dir_case(const char *path)
+{
+    if (path == nullptr || path[0] == '\0') {
+        return;
+    }
+    wchar_t *w = te_w_widen(path);
+    if (w == nullptr) {
+        return;
+    }
+    for (wchar_t *c = w; *c != L'\0'; c++) {
+        if (*c == L'/') {
+            *c = L'\\';
+        }
+    }
+    const wchar_t *leaf = wcsrchr(w, L'\\');
+    leaf = leaf != nullptr ? leaf + 1 : w;
+    size_t parent = (size_t)(leaf - w);
+    wchar_t *tmp = nullptr;
+    wchar_t *from = nullptr;
+    WIN32_FIND_DATAW fd = { 0 };
+
+    /* FindFirstFileW treats * and ? as wildcards: only look up a plain name. */
+    if (leaf[0] == L'\0' || wcspbrk(leaf, L"*?") != nullptr) {
+        goto out;
+    }
+    tmp = wcs_join(w, wcslen(w), L".case-rename");
+    if (tmp == nullptr) {
+        goto out;
+    }
+    /* An earlier start stopped between the two renames below: finish it. */
+    if (!find_entry(w, &fd) && find_entry(tmp, &fd) && plain_dir(&fd)) {
+        (void)MoveFileW(tmp, w);
+    }
+    if (!find_entry(w, &fd) || !plain_dir(&fd) || wcscmp(fd.cFileName, leaf) == 0 ||
+        _wcsicmp(fd.cFileName, leaf) != 0) {
+        goto out;   /* missing, not a folder, already right, or (8.3 alias) not the same name */
+    }
+    /* Rename from the folder's current spelling. NTFS accepts a rename that only
+     * changes case; where that is a no-op (Wine), go through a temporary name. */
+    from = wcs_join(w, parent, fd.cFileName);
+    if (from == nullptr) {
+        goto out;
+    }
+    (void)MoveFileW(from, w);
+    if (find_entry(w, &fd) && wcscmp(fd.cFileName, leaf) != 0 && MoveFileW(from, tmp)) {
+        (void)MoveFileW(tmp, w);   /* if this fails, the next start finishes it */
+    }
+out:
+    TE_FREE(from);
+    TE_FREE(tmp);
+    TE_FREE(w);
+}
+
+uint32_t os_clipboard_serial(void)
+{
+    return (uint32_t)GetClipboardSequenceNumber();
+}
+
 void os_harden_process(void)
 {
     /* Drop the current directory from the DLL search order so a planted SDL3.dll,

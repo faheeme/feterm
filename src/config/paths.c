@@ -14,7 +14,23 @@ te_err paths_config_dir(char *out, size_t outsz)
     if (rc != TE_OK) {
         return rc;
     }
-    return str_fmt(out, outsz, "%s/%s", base, APP_NAME);
+    return str_fmt(out, outsz, "%s/%s", base, APP_DIR_NAME);
+}
+
+void paths_fix_dir_case(void)
+{
+#ifdef _WIN32
+    /* Releases up to 0.5.2 made %APPDATA%\feterm and %LOCALAPPDATA%\feterm. */
+    char dir[TE_PATH_MAX] = { 0 };
+    if (paths_config_dir(dir, sizeof dir) == TE_OK) {
+        os_fix_dir_case(dir);
+    }
+    char base[TE_PATH_MAX] = { 0 };
+    if (os_local_data_base(base, sizeof base) == TE_OK &&
+        str_fmt(dir, sizeof dir, "%s/%s", base, APP_DIR_NAME) == TE_OK) {
+        os_fix_dir_case(dir);
+    }
+#endif
 }
 
 static te_err exe_dir(char *out, size_t outsz)

@@ -8,6 +8,7 @@
 #define TE_OS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "common.h"
 
 /* "/x" on POSIX; "C:/x", "C:\x" or "//server/share" on Windows. */
@@ -55,6 +56,19 @@ void os_mark_from_internet(const char *path);
 #ifdef _WIN32
 /* %LOCALAPPDATA%: per-user data that stays on this machine. */
 [[nodiscard]] te_err os_local_data_base(char *out, size_t outsz);
+
+/*
+ * If the directory at path exists under a name that differs only in case (an
+ * older "feterm" where path ends in "FeTerm"), rename it to path's exact
+ * spelling. Windows names ignore case, so this changes only what Explorer
+ * shows. Best-effort: on failure (e.g. a file inside is open) the old spelling
+ * stays, and every path still resolves to it.
+ */
+void os_fix_dir_case(const char *path);
+
+/* The clipboard's change counter: it moves whenever any program sets the
+ * clipboard. 0 if this process cannot read it. */
+[[nodiscard]] uint32_t os_clipboard_serial(void);
 #endif
 
 #endif
