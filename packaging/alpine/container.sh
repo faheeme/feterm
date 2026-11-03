@@ -1,7 +1,7 @@
 #!/bin/sh
 # Runs inside a throwaway alpine container started by build-repo.sh; not for
 # use on its own. Mounts (read-only except /dest and /out):
-#   /in/APKBUILD, /in/*.patch   the package recipe
+#   /in/APKBUILD, /in/*.patch   the package recipe (patches optional)
 #   /keys/NAME.rsa[.pub]        signing key ("build"; only the .pub for "smoke")
 #   /dest                       REPODEST: feterm/<arch>/ with the older packages
 #   /out                        "checksum" writes the updated APKBUILD here
@@ -44,7 +44,10 @@ adduser -D -u 1500 builder
 addgroup builder abuild
 work=/home/builder/aports/feterm/feterm
 mkdir -p "$work"
-cp /in/APKBUILD /in/*.patch "$work"/
+cp /in/APKBUILD "$work"/
+for f in /in/*.patch; do
+    [ -e "$f" ] && cp "$f" "$work"/   # patches are optional: a release may need none
+done
 
 if [ "$mode" = checksum ]; then
     chown -R builder:builder /home/builder
