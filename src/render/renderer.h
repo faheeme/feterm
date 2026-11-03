@@ -44,6 +44,7 @@ typedef struct te_frame {
     bool  animate_cursor;            /* smooth cursor movement (only for the focused pane) */
     uint32_t anim_key;               /* identifies the pane whose cursor is animated */
     uint64_t now_ms;
+    bool  scrollbar_active;          /* hovered or dragged: show it even at the bottom */
 } te_frame;
 
 /* Window decorations drawn after all panes. */

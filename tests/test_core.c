@@ -1,4 +1,5 @@
 /* Headless tests for the core (no window needed). Run with `make test`. */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,6 +17,7 @@
 #include "vt/images.h"
 #include "input/keybind.h"
 #include "input/mouse.h"
+#include "ui/scrollbar.h"
 #include "ui/search.h"
 #include "ui/selection.h"
 #include "ui/url.h"
@@ -981,6 +983,41 @@ static void test_osc8_and_abs(void)
     term_destroy(&t);
 }
 
+static void test_scrollbar(void)
+{
+    te_scrollbar sb;
+    /* Nothing to scroll, or no pane: no scrollbar. */
+    CHECK(!scrollbar_geom(0, 24, 0, 800, 480, 20.0f, 1.0f, false, &sb));
+    CHECK(!scrollbar_geom(100, 0, 0, 800, 480, 20.0f, 1.0f, false, &sb));
+    CHECK(!scrollbar_geom(100, 24, 0, 0, 480, 20.0f, 1.0f, false, &sb));
+    CHECK(!scrollbar_geom(100, 24, 0, 800, 480, 20.0f, 1.0f, false, nullptr));
+
+    /* 1000 lines of history + 24 rows in 480 px: thumb at the bottom, then the top. */
+    CHECK(scrollbar_geom(1000, 24, 0, 800, 480, 20.0f, 1.0f, false, &sb));
+    CHECK(sb.len >= 20.0f && sb.len <= 480.0f && sb.top + sb.len <= 480.5f && sb.top >= sb.span - 0.01f);
+    CHECK(sb.x + sb.w <= 800.0f && sb.hit_x < sb.x && sb.hit_x >= 780.0f);
+    CHECK(scrollbar_geom(1000, 24, 1000, 800, 480, 20.0f, 1.0f, false, &sb) && sb.top == 0.0f);
+    CHECK(scrollbar_geom(1000, 24, 5000, 800, 480, 20.0f, 1.0f, false, &sb) && sb.top == 0.0f);   /* clamped */
+    te_scrollbar hot;
+    CHECK(scrollbar_geom(1000, 24, 0, 800, 480, 20.0f, 2.0f, true, &hot) && hot.w > sb.w);
+
+    /* Dragging maps back to the same offset, and stays inside the history. */
+    for (uint32_t off = 0; off <= 1000; off += 37) {
+        CHECK(scrollbar_geom(1000, 24, off, 800, 480, 20.0f, 1.0f, false, &sb));
+        CHECK(scrollbar_offset_at(&sb, 1000, sb.top) == off);
+    }
+    CHECK(scrollbar_offset_at(&sb, 1000, -500.0f) == 1000);    /* above the track: the top */
+    CHECK(scrollbar_offset_at(&sb, 1000, 1e9f) == 0);          /* below it: the bottom */
+    CHECK(scrollbar_offset_at(&sb, 1000, NAN) == 0);
+    CHECK(scrollbar_offset_at(nullptr, 1000, 10.0f) == 0);
+
+    /* A pane shorter than one thumb cannot move it: stays at the bottom. */
+    CHECK(scrollbar_geom(10, 24, 5, 800, 10, 20.0f, 1.0f, false, &sb) && sb.span == 0.0f && sb.len == 10.0f);
+    CHECK(scrollbar_offset_at(&sb, 10, 3.0f) == 0);
+    /* A pane narrower than the grab strip: the strip is the whole pane. */
+    CHECK(scrollbar_geom(10, 24, 0, 6, 480, 20.0f, 1.0f, false, &sb) && sb.hit_x == 0.0f);
+}
+
 static void test_selection(void)
 {
     te_term *t = mk_term(12, 4, 20);
@@ -1535,6 +1572,7 @@ int main(void)
     test_reflow();
     test_osc8_and_abs();
     test_selection();
+    test_scrollbar();
     test_mouse();
     test_urls();
     test_search();

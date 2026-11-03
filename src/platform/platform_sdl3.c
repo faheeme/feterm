@@ -421,6 +421,9 @@ static bool translate(te_platform *p, const SDL_Event *e, te_event *ev)
     case SDL_EVENT_WINDOW_EXPOSED:
         ev->type = TE_EV_EXPOSE;
         return true;
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+        ev->type = TE_EV_MOUSE_LEAVE;
+        return true;
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         ev->type = TE_EV_FOCUS;

@@ -219,6 +219,7 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Ctrl+Shift+= / - / 0 | zoom in / out / reset |
 | Shift+PgUp / PgDn, Shift+Home / End | scroll through history |
 | Ctrl+Shift+Up / Down, mouse wheel | scroll by line |
+| Drag the scrollbar (right edge; appears on hover) | scroll through history; click the track to jump there |
 | Ctrl+Shift+H | highlighting: auto → off → each profile → auto |
 | Ctrl+Shift+R | reload configuration (also automatic when files change) |
 | Ctrl+Shift+T / Ctrl+Shift+W | new tab / close pane (closing the last pane closes the tab) |
@@ -309,6 +310,11 @@ or press Ctrl+Shift+B to collapse it to a thin strip.
 - **Shared logins:** SSH sessions share one login per host (OpenSSH connection sharing).
   Opening a second tab to the same host is instant, and the file explorer will reuse it. If
   an old device refuses shared connections, untick "Share login" for that session.
+- **Agent forwarding:** tick "Forward agent" on an SSH session to use your local SSH agent's
+  keys on the server (e.g. `git` or a further `ssh` from there) without copying them to it.
+  Only enable it for servers you trust: their admins can use your agent while you are
+  connected. Unticked, `ForwardAgent` in `~/.ssh/config` still applies. On Windows, start
+  the "OpenSSH Authentication Agent" service and `ssh-add` your key first.
 
 Sessions are plain files: `~/.config/feterm/sessions/<folder>/<name>.ini` (mode 0600). You
 can back them up, sync them, or edit them by hand.

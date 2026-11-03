@@ -42,6 +42,7 @@ typedef enum te_event_type {
     TE_EV_MOUSE_BUTTON,
     TE_EV_MOUSE_MOTION,
     TE_EV_MOUSE_WHEEL,
+    TE_EV_MOUSE_LEAVE,    /* the pointer left the window */
     TE_EV_FD_READY,       /* a watched file descriptor is readable (.fd.tag says which) */
     TE_EV_DROP,           /* a file dragged from the desktop was dropped (.drop; free with plat_event_free) */
     TE_EV_DIALOG,         /* a file dialog finished (.dialog; free with plat_event_free) */

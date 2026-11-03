@@ -142,6 +142,7 @@ static void test_session_store(void)
     (void)str_copy(s.folder, sizeof s.folder, "Datacenter/Core");
     (void)str_copy(s.host, sizeof s.host, "10.0.0.1");
     s.port = 2222;
+    s.forward_agent = true;
     CHECK(store_save_session(&st, &s, nullptr, nullptr) == TE_OK);
     CHECK(store_save_session(&st, &s, nullptr, nullptr) == TE_ERR_EXISTS);   /* no silent overwrite */
 
@@ -163,7 +164,8 @@ static void test_session_store(void)
     }
     int si = store_find_session(&st, "Datacenter/Core", "core-sw1");
     CHECK(si >= 0 && st.nodes[si].sess != nullptr && st.nodes[si].sess->port == 2222 &&
-          strcmp(st.nodes[si].sess->host, "10.0.0.1") == 0);
+          strcmp(st.nodes[si].sess->host, "10.0.0.1") == 0 && st.nodes[si].sess->forward_agent &&
+          st.nodes[si].sess->share_conn);
     int ci = store_find_session(&st, "", "console");
     CHECK(ci >= 0 && st.nodes[ci].sess != nullptr && st.nodes[ci].sess->serial.baud == 115200 &&
           st.nodes[ci].sess->type == TE_SESS_SERIAL);
@@ -306,6 +308,15 @@ static void test_launch_argv(void)
     CHECK(argv_has(&l, "ControlPath=/run/user/1000/feterm/cm-%C") && argv_has(&l, "admin"));
 #endif
     CHECK(l.argc >= 2 && strcmp(l.argv[l.argc - 2], "--") == 0 && strcmp(l.argv[l.argc - 1], "10.1.1.1") == 0);
+    CHECK(!argv_has(&l, "ForwardAgent=yes"));   /* off unless asked: ~/.ssh/config decides */
+    s.forward_agent = true;
+    CHECK(launch_build(&s, &eff, &o, &l) == TE_OK && argv_has(&l, "ForwardAgent=yes"));
+#ifndef _WIN32
+    /* Its own shared login, so forwarding is never lost to one made without it. */
+    CHECK(argv_has(&l, "ControlPath=/run/user/1000/feterm/cma-%C") &&
+          !argv_has(&l, "ControlPath=/run/user/1000/feterm/cm-%C"));
+#endif
+    s.forward_agent = false;
     s.share_conn = false;
     CHECK(launch_build(&s, &eff, &o, &l) == TE_OK && !argv_has(&l, "ControlMaster=auto"));
 

@@ -462,6 +462,11 @@ te_err session_parse_kv(te_session *s, const char *section, const char *key, con
             s->share_conn = b;
             return TE_OK;
         }
+        if (strcmp(key, "forward_agent") == 0) {
+            if (!str_to_bool(value, &b)) return TE_ERR_PARSE;
+            s->forward_agent = b;
+            return TE_OK;
+        }
         if (strcmp(key, "color") == 0) return tag_color_parse(value, &s->color) ? TE_OK : TE_ERR_PARSE;
         if (strcmp(key, "anti_idle") == 0) return parse_anti_idle(value, &s->anti_idle);
         if (strcmp(key, "highlight") == 0) return set_text(s->highlight, sizeof s->highlight, value);
@@ -527,6 +532,7 @@ te_err session_serialize(const te_session *s, char *out, size_t outsz)
             rc = put(out, outsz, "identity_file", s->identity);
             if (rc == TE_OK) rc = put(out, outsz, "jump_host", s->jump);
             if (rc == TE_OK) rc = put(out, outsz, "share_connection", s->share_conn ? "true" : "false");
+            if (rc == TE_OK) rc = put(out, outsz, "forward_agent", s->forward_agent ? "true" : "false");
         }
     }
     if (rc == TE_OK) rc = put(out, outsz, "color", tag_color_name(s->color));

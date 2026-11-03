@@ -508,7 +508,7 @@ static size_t add_common_ssh_opts(te_remote *r, const char **argv, size_t n, cha
     ARG("ServerAliveCountMax=10");
     if (!r->direct && r->s.share_conn && r->control_dir[0] == '/') {
         ARG("-o");
-        FMT("ControlPath=%s/cm-%%C", r->control_dir);
+        FMT("ControlPath=%s/%s", r->control_dir, launch_control_name(&r->s));
         ARG("-o");
         ARG("ControlMaster=no");
         r->used_mux = true;

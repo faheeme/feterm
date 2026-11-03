@@ -48,6 +48,11 @@ te_err launch_expand_home(const char *in, char *out, size_t outsz)
     return str_copy(out, outsz, in);
 }
 
+const char *launch_control_name(const te_session *s)
+{
+    return s != nullptr && s->forward_agent ? "cma-%C" : "cm-%C";
+}
+
 static te_err build_ssh(const te_session *s, const te_session_eff *eff, const te_launch_opts *o, te_launch *l)
 {
     int ka = o->keepalive > 0 ? o->keepalive : 30;
@@ -67,11 +72,15 @@ static te_err build_ssh(const te_session *s, const te_session_eff *eff, const te
         if (rc == TE_OK) rc = arg(l, "-o");
         if (rc == TE_OK) {
             char cp[TE_SESS_PATH_MAX] = { 0 };
-            rc = str_fmt(cp, sizeof cp, "ControlPath=%s/cm-%%C", o->control_dir);
+            rc = str_fmt(cp, sizeof cp, "ControlPath=%s/%s", o->control_dir, launch_control_name(s));
             if (rc == TE_OK) rc = arg(l, cp);
         }
         if (rc == TE_OK) rc = arg(l, "-o");
         if (rc == TE_OK) rc = arg(l, "ControlPersist=60");
+    }
+    if (rc == TE_OK && s->forward_agent) {
+        rc = arg(l, "-o");
+        if (rc == TE_OK) rc = arg(l, "ForwardAgent=yes");
     }
     if (rc == TE_OK && s->port != 0) {
         rc = arg(l, "-p");

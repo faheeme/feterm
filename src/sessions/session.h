@@ -48,6 +48,7 @@ typedef struct te_session {
     char          identity[TE_SESS_PATH_MAX];       /* SSH private key, may start with ~/ */
     char          jump[TE_SESS_HOST_MAX + 1];       /* SSH ProxyJump: [user@]host[:port][,...] */
     bool          share_conn;      /* SSH ControlMaster multiplexing */
+    bool          forward_agent;   /* SSH agent forwarding (ForwardAgent=yes) */
     /* Serial */
     te_serial_cfg serial;
     /* Local */
