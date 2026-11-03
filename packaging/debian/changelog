@@ -1,3 +1,12 @@
+feterm (0.5.3-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: the scrollbar can be dragged (it appears when
+    the pointer is on the right edge), SSH sessions get a "Forward agent"
+    option, and two new themes, Emerald Velvet and Neon Moss. The other
+    changes in this release are Windows-only.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Tue, 03 Nov 2026 20:34:45 +0200
+
 feterm (0.5.2-1~ppa1) resolute; urgency=medium
 
   * New upstream release: adds a macOS port (Apple Silicon and Intel) with
