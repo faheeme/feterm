@@ -1,5 +1,5 @@
 Name:           feterm
-Version:        0.5.2
+Version:        0.5.3
 Release:        1%{?dist}
 Summary:        Modern terminal emulator with network-device syntax highlighting
 License:        MIT
@@ -42,6 +42,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.gitlab.faheeme.%{n
 %{_datadir}/icons/hicolor/*/apps/io.gitlab.faheeme.%{name}*
 
 %changelog
+* Tue Nov 03 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.3-1
+- Draggable scrollbar, SSH agent forwarding option, two green themes
+
 * Tue Oct 27 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.2-1
 - macOS port; pty made non-blocking before fork; shortcut hints follow the keymap
 
