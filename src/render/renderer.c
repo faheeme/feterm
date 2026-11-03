@@ -5,6 +5,7 @@
 
 #include "render/boxdraw.h"
 #include "render/gl.h"
+#include "ui/scrollbar.h"
 #include "util/log.h"
 #include "util/mem.h"
 #include "util/str.h"
@@ -1036,16 +1037,13 @@ static void build(te_renderer *r, const te_term *t, const te_render_opts *o, con
         }
     }
 
-    /* Scroll position indicator while viewing history. */
+    /* Scrollbar: shown while viewing history, or while the pointer is on it. */
     uint32_t off = term_view_offset(t);
-    if (off > 0) {
-        float total = (float)term_scrollback_count(t) + (float)rows;
-        float track = (float)f->height;
-        float thumb = track * (float)rows / total;
-        if (thumb < ch) thumb = ch;
-        float top = (track - thumb) * (float)(term_scrollback_count(t) - off) / (float)term_scrollback_count(t);
-        float sw = 4.0f * (f->scale > 0.0f ? f->scale : 1.0f);
-        push_rect(&r->deco, (float)f->width - sw - 2.0f, top, sw, thumb, dfg, 0.35f);
+    te_scrollbar sb;
+    if ((off > 0 || f->scrollbar_active) &&
+        scrollbar_geom(term_scrollback_count(t), rows, off, f->width, f->height, ch, f->scale, f->scrollbar_active,
+                       &sb)) {
+        push_rect(&r->deco, sb.x, sb.top, sb.w, sb.len, dfg, f->scrollbar_active ? 0.6f : 0.35f);
     }
     if (f->bell > 0.0f) {
         push_rect(&r->tint, 0.0f, 0.0f, (float)f->width, (float)f->height, dfg, 0.12f * f->bell);

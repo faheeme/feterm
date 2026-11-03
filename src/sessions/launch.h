@@ -45,4 +45,12 @@ typedef struct te_launch {
 /* Expand a leading "~/" with $HOME. */
 [[nodiscard]] te_err launch_expand_home(const char *in, char *out, size_t outsz);
 
+/*
+ * File name of an SSH session's shared connection (ControlPath) inside the
+ * control directory; OpenSSH expands %C. Sessions that forward the agent get
+ * their own: OpenSSH only forwards it if the first login to the host asked for
+ * it, so sharing a login made without it would silently drop the forwarding.
+ */
+[[nodiscard]] const char *launch_control_name(const te_session *s);
+
 #endif

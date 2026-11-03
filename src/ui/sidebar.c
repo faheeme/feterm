@@ -28,7 +28,7 @@ enum {
 
 /* Dialog fields */
 enum {
-    FD_NAME = 1, FD_FOLDER, FD_TYPE, FD_HOST, FD_PORT, FD_USER, FD_KEY, FD_JUMP, FD_SHARE, FD_DEVICE, FD_BAUD,
+    FD_NAME = 1, FD_FOLDER, FD_TYPE, FD_HOST, FD_PORT, FD_USER, FD_KEY, FD_JUMP, FD_SHARE, FD_AGENT, FD_DEVICE, FD_BAUD,
     FD_BAUD_CUSTOM, FD_DATA, FD_PARITY, FD_STOP, FD_FLOW, FD_COMMAND, FD_DIR, FD_COLOR, FD_ANTI_IDLE,
     FD_HIGHLIGHT, FD_TARGET, FD_SAVE,
 };
@@ -479,6 +479,7 @@ static void update_session_form(te_sidebar *sb)
     form_show(f, FD_KEY, ssh);
     form_show(f, FD_JUMP, ssh);
     form_show(f, FD_SHARE, ssh);
+    form_show(f, FD_AGENT, ssh);
     form_show(f, FD_DEVICE, ser);
     form_show(f, FD_BAUD, ser);
     form_show(f, FD_BAUD_CUSTOM, ser && form_choice(f, FD_BAUD) + 1 == nbaud_choices);
@@ -555,6 +556,8 @@ static void open_session_form(te_sidebar *sb, int purpose, const te_session *s, 
     }
     fl = form_add(f, FD_SHARE, TE_FIELD_CHECK, "Share login", nullptr);
     if (fl != nullptr) fl->checked = s->share_conn;
+    fl = form_add(f, FD_AGENT, TE_FIELD_CHECK, "Forward agent", nullptr);
+    if (fl != nullptr) fl->checked = s->forward_agent;
     fl = form_add(f, FD_DEVICE, TE_FIELD_TEXT, "Device", s->serial.device[0] != '\0' ? s->serial.device : TE_SERIAL_EXAMPLE);
     bool custom = false;
     size_t bc = baud_choice_of(s->serial.baud, &custom);
@@ -625,6 +628,7 @@ static bool session_from_form(te_sidebar *sb, te_session *s)
     (void)str_copy(s->identity, sizeof s->identity, form_value(f, FD_KEY));
     (void)str_copy(s->jump, sizeof s->jump, form_value(f, FD_JUMP));
     s->share_conn = form_checked(f, FD_SHARE);
+    s->forward_agent = form_checked(f, FD_AGENT);
     (void)str_copy(s->serial.device, sizeof s->serial.device, form_value(f, FD_DEVICE));
     size_t bc = form_choice(f, FD_BAUD);
     if (bc + 1 == nbaud_choices) {

@@ -36,6 +36,7 @@
 #include "sessions/telnet.h"
 #include "ui/files.h"
 #include "ui/paint.h"
+#include "ui/scrollbar.h"
 #include "ui/search.h"
 #include "ui/selection.h"
 #include "ui/sidebar.h"
@@ -115,6 +116,9 @@ typedef struct app {
     bool          hover_valid;
     te_pane      *hover_pane;
     te_node      *drag_split;        /* divider being dragged */
+    te_pane      *sbar_drag;         /* pane whose scrollbar thumb is being dragged */
+    float         sbar_grab;         /* pointer offset from the thumb's top edge */
+    te_pane      *sbar_hover;        /* pane whose scrollbar is under the pointer */
 
     /* Paste confirmation */
     char         *pending_paste;
@@ -614,6 +618,8 @@ static void close_pane(app *a, te_pane *p)
     }
     if (a->mouse_pane == p) a->mouse_pane = nullptr;
     if (a->hover_pane == p) { a->hover_pane = nullptr; a->hover_valid = false; }
+    if (a->sbar_drag == p) a->sbar_drag = nullptr;
+    if (a->sbar_hover == p) a->sbar_hover = nullptr;
     a->drag_split = nullptr;
     if (a->pending_paste != nullptr && a->paste_pane_id == p->id) {
         TE_FREE(a->pending_paste);
@@ -1614,6 +1620,48 @@ static bool reporting(const te_pane *p, uint32_t mods)
     return p != nullptr && term_modes(p->term)->mouse != TE_MOUSE_NONE && (mods & TE_MOD_SHIFT) == 0 && !p->exited;
 }
 
+/* The pane's scrollbar as drawn now. false: nothing to scroll (no history, or a
+ * full-screen program on the alternate screen, which has none). */
+static bool pane_scrollbar(const app *a, const te_pane *p, te_scrollbar *out)
+{
+    if (p == nullptr || p->term == nullptr || term_modes(p->term)->alt_screen) {
+        return false;
+    }
+    const te_font_metrics *m = font_metrics(a->font);
+    bool active = a->sbar_drag == p || a->sbar_hover == p;
+    return scrollbar_geom(term_scrollback_count(p->term), term_rows(p->term), term_view_offset(p->term), p->w, p->h,
+                          (float)m->cell_h, a->scale, active, out);
+}
+
+/* Is (px, py) on p's scrollbar strip? A program reading the mouse (tmux, htop)
+ * keeps the right edge unless the view is already scrolled back. */
+static bool on_scrollbar(const app *a, const te_pane *p, float px, float py, uint32_t mods, te_scrollbar *out)
+{
+    if (!pane_scrollbar(a, p, out) || (reporting(p, mods) && term_view_offset(p->term) == 0)) {
+        return false;
+    }
+    float lx = px - (float)p->x;
+    float ly = py - (float)p->y;
+    return lx >= out->hit_x && lx < (float)p->w && ly >= 0.0f && ly < (float)p->h;
+}
+
+/* Move p's view so the dragged thumb's top sits at ly - grab (pane-relative). */
+static void scrollbar_drag_to(app *a, te_pane *p, float ly)
+{
+    te_scrollbar sb;
+    if (!pane_scrollbar(a, p, &sb)) {
+        a->sbar_drag = nullptr;   /* history gone (cleared, or vim started) */
+        return;
+    }
+    uint32_t want = scrollbar_offset_at(&sb, term_scrollback_count(p->term), ly - a->sbar_grab);
+    int64_t delta = (int64_t)want - (int64_t)term_view_offset(p->term);
+    delta = TE_CLAMP(delta, (int64_t)-INT32_MAX, (int64_t)INT32_MAX);
+    if (delta != 0) {
+        term_scroll_view(p->term, (int)delta);
+    }
+    a->need_render = true;
+}
+
 static void report_mouse(app *a, te_pane *p, te_mouse_action act, int button, uint32_t mods, float px, float py)
 {
     const te_modes *m = term_modes(p->term);
@@ -1667,7 +1715,8 @@ static void update_hover(app *a, te_pane *p, float px, float py, uint32_t mods)
         show_toast(a, msg);
     }
     te_pointer ptr = a->hover_valid ? TE_POINTER_HAND : TE_POINTER_TEXT;
-    if (layout_divider_at(&a->layout, (int)px, (int)py, DIVIDER_SLOP) != nullptr || py < (float)tab_bar_height(a)) {
+    if (layout_divider_at(&a->layout, (int)px, (int)py, DIVIDER_SLOP) != nullptr || py < (float)tab_bar_height(a) ||
+        a->sbar_hover != nullptr) {
         ptr = TE_POINTER_DEFAULT;
     }
     plat_set_pointer(a->plat, ptr);
@@ -1806,6 +1855,22 @@ static void on_button(app *a, const te_event *ev)
             a->need_render = true;
         }
         a->mouse_pane = hit;
+        /* Scrollbar: grab the thumb where it was pressed, or jump the thumb's
+         * middle to a press on the track; either way, dragging follows. */
+        te_scrollbar sb;
+        if (b == TE_MB_LEFT && hit != nullptr && on_scrollbar(a, hit, ev->button.x, ev->button.y, mods, &sb)) {
+            float ly = ev->button.y - (float)hit->y;
+            bool on_thumb = ly >= sb.top && ly < sb.top + sb.len;
+            a->sbar_grab = on_thumb ? ly - sb.top : sb.len / 2.0f;
+            a->sbar_drag = hit;
+            scrollbar_drag_to(a, hit, ly);
+            return;
+        }
+    }
+    if (!ev->button.down && a->sbar_drag != nullptr && b == TE_MB_LEFT) {
+        a->sbar_drag = nullptr;
+        a->need_render = true;
+        return;
     }
     if (!ev->button.down && a->drag_split != nullptr && b == TE_MB_LEFT) {
         a->drag_split = nullptr;
@@ -1918,8 +1983,28 @@ static void on_motion(app *a, const te_event *ev)
         relayout(a);
         return;
     }
+    if (a->sbar_drag != nullptr) {
+        if (left) {
+            scrollbar_drag_to(a, a->sbar_drag, ev->motion.y - (float)a->sbar_drag->y);
+            return;
+        }
+        a->sbar_drag = nullptr;   /* the release happened where we did not see it */
+        a->need_render = true;
+    }
     te_pane *under = layout_pane_at(&a->layout, (int)ev->motion.x, (int)ev->motion.y);
-    update_hover(a, under, ev->motion.x, ev->motion.y, mods);
+    if (a->buttons_held == 0) {
+        te_scrollbar sb;
+        te_pane *sh = under != nullptr && on_scrollbar(a, under, ev->motion.x, ev->motion.y, mods, &sb) ? under : nullptr;
+        if (sh != a->sbar_hover) {
+            a->sbar_hover = sh;
+            a->need_render = true;
+        }
+    }
+    /* On the scrollbar: an arrow pointer and no link hover. */
+    update_hover(a, a->sbar_hover != nullptr ? nullptr : under, ev->motion.x, ev->motion.y, mods);
+    if (a->sbar_hover != nullptr) {
+        return;
+    }
     bool left_down = (ev->motion.buttons & 1u) != 0;
     te_pane *p = left_down || a->buttons_held != 0 ? a->mouse_pane : under;
     if (p == nullptr) {
@@ -2044,6 +2129,12 @@ static void handle_event(app *a, const te_event *ev)
     case TE_EV_MOUSE_WHEEL:  on_wheel(a, ev); break;
     case TE_EV_MOUSE_BUTTON: on_button(a, ev); break;
     case TE_EV_MOUSE_MOTION: on_motion(a, ev); break;
+    case TE_EV_MOUSE_LEAVE:
+        if (a->sbar_hover != nullptr) {
+            a->sbar_hover = nullptr;   /* hide a bar the pointer left through the window edge */
+            a->need_render = true;
+        }
+        break;
     case TE_EV_DROP:
         if (ev->drop.path != nullptr) {
             te_pane *fp = focus_pane(a);
@@ -2222,6 +2313,7 @@ static void render_pane(app *a, te_pane *p, bool focused_pane, bool several, uin
         .animate_cursor = a->cfg.cursor_animate && focused_pane,
         .anim_key = p->id,
         .now_ms = now,
+        .scrollbar_active = a->sbar_drag == p || a->sbar_hover == p,
     };
     if (p->w > 0 && p->h > 0) {
         (void)renderer_draw(a->ren, p->term, &o, &f);
