@@ -22,6 +22,7 @@
 #include "config/theme.h"
 #include "input/keys.h"
 #include "util/mem.h"
+#include "util/os.h"
 #include "util/str.h"
 #include "util/utf8.h"
 #include "vt/term.h"
@@ -521,7 +522,7 @@ static bool setup_hl_dir(void)
         return false;
     }
     char dir[600] = { 0 };
-    (void)str_fmt(dir, sizeof dir, "%s/%s", g_hl_root, APP_NAME);
+    (void)str_fmt(dir, sizeof dir, "%s/%s", g_hl_root, APP_DIR_NAME);
     if (mkdir(dir, 0700) != 0) return false;
     (void)str_append(dir, sizeof dir, "/highlight");
     if (mkdir(dir, 0700) != 0) return false;
@@ -550,6 +551,62 @@ static bool setup_hl_dir(void)
     return setenv("XDG_CONFIG_HOME", g_hl_root, 1) == 0;
 #endif
 }
+
+#ifdef _WIN32
+/* Real on-disk spelling of path's last component, via FindFirstFileA. */
+static bool disk_name(const char *path, char *out, size_t outsz)
+{
+    WIN32_FIND_DATAA fd = { 0 };
+    HANDLE h = FindFirstFileA(path, &fd);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    FindClose(h);
+    return str_copy(out, outsz, fd.cFileName) == TE_OK;
+}
+
+/* A config folder from an older release ("feterm") takes the current spelling. */
+static void test_dir_case(void)
+{
+    char root[512] = { 0 };
+    CHECK(tmp_template(root, sizeof root, "te-case")[0] != '\0' && mkdtemp(root) != nullptr);
+    char old_dir[600] = { 0 };
+    char new_dir[600] = { 0 };
+    char name[MAX_PATH] = { 0 };
+    CHECK(str_fmt(old_dir, sizeof old_dir, "%s/feterm", root) == TE_OK && mkdir(old_dir, 0700) == 0);
+    CHECK(str_fmt(new_dir, sizeof new_dir, "%s/FeTerm", root) == TE_OK);
+    os_fix_dir_case(new_dir);
+    CHECK(disk_name(new_dir, name, sizeof name) && strcmp(name, "FeTerm") == 0);
+    os_fix_dir_case(new_dir);                       /* already right: nothing changes */
+    CHECK(disk_name(new_dir, name, sizeof name) && strcmp(name, "FeTerm") == 0);
+
+    /* A file is never renamed, and wildcards or a missing folder are ignored. */
+    char file[600] = { 0 };
+    char want[600] = { 0 };
+    CHECK(str_fmt(file, sizeof file, "%s/notes", root) == TE_OK);
+    FILE *fp = fopen(file, "w");
+    CHECK(fp != nullptr);
+    if (fp != nullptr) fclose(fp);
+    CHECK(str_fmt(want, sizeof want, "%s/NOTES", root) == TE_OK);
+    os_fix_dir_case(want);
+    CHECK(disk_name(want, name, sizeof name) && strcmp(name, "notes") == 0);
+    CHECK(str_fmt(want, sizeof want, "%s/Fe*", root) == TE_OK);
+    os_fix_dir_case(want);
+    CHECK(str_fmt(want, sizeof want, "%s/missing", root) == TE_OK);
+    os_fix_dir_case(want);
+    os_fix_dir_case(nullptr);
+
+    /* A rename cut short after its first step is finished on the next start. */
+    char half[600] = { 0 };
+    CHECK(rmdir(new_dir) == 0);
+    CHECK(str_fmt(half, sizeof half, "%s/FeTerm.case-rename", root) == TE_OK && mkdir(half, 0700) == 0);
+    os_fix_dir_case(new_dir);
+    CHECK(disk_name(new_dir, name, sizeof name) && strcmp(name, "FeTerm") == 0);
+    CHECK(!disk_name(half, name, sizeof name));
+
+    (void)remove(file);
+    (void)rmdir(new_dir);
+    (void)rmdir(root);
+}
+#endif
 
 static void test_highlight(void)
 {
@@ -677,12 +734,12 @@ static void test_highlight(void)
     static const char *const names[] = { "network-common.ini", "cisco.ini", "arista.ini", "juniper.ini", "zz-redos.ini" };
     char path[800] = { 0 };
     for (size_t i = 0; i < TE_ARRAY_LEN(names); i++) {
-        (void)str_fmt(path, sizeof path, "%s/%s/highlight/%s", g_hl_root, APP_NAME, names[i]);
+        (void)str_fmt(path, sizeof path, "%s/%s/highlight/%s", g_hl_root, APP_DIR_NAME, names[i]);
         (void)unlink(path);
     }
-    (void)str_fmt(path, sizeof path, "%s/%s/highlight", g_hl_root, APP_NAME);
+    (void)str_fmt(path, sizeof path, "%s/%s/highlight", g_hl_root, APP_DIR_NAME);
     (void)rmdir(path);
-    (void)str_fmt(path, sizeof path, "%s/%s", g_hl_root, APP_NAME);
+    (void)str_fmt(path, sizeof path, "%s/%s", g_hl_root, APP_DIR_NAME);
     (void)rmdir(path);
     (void)rmdir(g_hl_root);
 }
@@ -1471,6 +1528,9 @@ int main(void)
     test_ini();
     test_config_transparency();
     test_highlight();
+#ifdef _WIN32
+    test_dir_case();
+#endif
     test_click();
     test_reflow();
     test_osc8_and_abs();

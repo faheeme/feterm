@@ -121,11 +121,11 @@ and writes to `dist/`:
 Both hold `feterm.exe`, `feterm-helper.exe` (the Telnet and serial clients, a console
 program), the DLLs they need (found by `windows/stage.sh` from their imports, including
 ANGLE's `libEGL.dll`/`libGLESv2.dll`, which draw through Direct3D 11), fontconfig's
-`etc\fonts` and FeTerm's `data\`. Settings and sessions live in `%APPDATA%\feterm`; neither
+`etc\fonts` and FeTerm's `data\`. Settings and sessions live in `%APPDATA%\FeTerm`; neither
 the installer nor its uninstaller touches them. SSH sessions and the Files tab (SFTP, and
 SCP for servers without it) use the OpenSSH client that ships with Windows
 (`System32\OpenSSH`, else `ssh.exe` on `PATH`); "edit locally" copies go to
-`%LOCALAPPDATA%\feterm\edit`.
+`%LOCALAPPDATA%\FeTerm\edit`.
 
 The installer (`windows/feterm.iss`, Inno Setup) adds a Start-menu entry and, if ticked, a
 desktop shortcut and "Open FeTerm here" on folders. Never change its `AppId`: Windows and

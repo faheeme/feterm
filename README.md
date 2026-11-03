@@ -93,7 +93,7 @@ Windows 10 (version 1809 or newer) and 11, x64. Download from the
 - `feterm-X.Y.Z-windows-x64.zip`: portable. Unzip anywhere and run `feterm.exe`.
 
 The files are not code-signed yet, so SmartScreen may warn the first time: choose
-**More info → Run anyway**. Settings and sessions live in `%APPDATA%\feterm`.
+**More info → Run anyway**. Settings and sessions live in `%APPDATA%\FeTerm`.
 
 If Microsoft Defender blocks or quarantines FeTerm instead:
 
@@ -209,7 +209,7 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Shortcut (default) | Action |
 |---|---|
 | Ctrl+Shift+C / Ctrl+Shift+V | copy selection / paste clipboard |
-| Shift+Insert, middle click | paste the primary selection |
+| Shift+Insert, middle click | paste the primary selection (on Windows: the last text selected in FeTerm or copied anywhere, whichever is newer) |
 | drag, double-click, triple-click | select text, a word (IPs, paths, URLs), a whole line |
 | Alt+drag | rectangular selection |
 | Shift+drag / Shift+click | select even when a program uses the mouse |

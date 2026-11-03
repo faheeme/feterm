@@ -1,4 +1,4 @@
-/* Locating configuration and data files. All names derive from APP_NAME. */
+/* Locating configuration and data files. All names derive from APP_DIR_NAME. */
 #ifndef TE_PATHS_H
 #define TE_PATHS_H
 
@@ -7,8 +7,12 @@
 
 #define TE_PATH_MAX 4096
 
-/* $XDG_CONFIG_HOME/APP_NAME, or $HOME/.config/APP_NAME. */
+/* $XDG_CONFIG_HOME/APP_NAME, $HOME/.config/APP_NAME, or %APPDATA%\APP_DIR_NAME on Windows. */
 [[nodiscard]] te_err paths_config_dir(char *out, size_t outsz);
+
+/* Windows: bring an existing config/data folder from an older release ("feterm")
+ * to the current spelling ("FeTerm"). Call once at startup. A no-op elsewhere. */
+void paths_fix_dir_case(void);
 
 /*
  * Look for a relative data path (e.g. "themes/nord.ini") in, in order:

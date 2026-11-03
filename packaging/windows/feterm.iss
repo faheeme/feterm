@@ -6,7 +6,7 @@
 ;  Installs per user (no administrator rights, %LOCALAPPDATA%\Programs) by
 ;  default; the installer offers "install for all users" too, which winget
 ;  uses for --scope machine. Upgrades replace the previous version in place;
-;  the user's settings and sessions in %APPDATA%\feterm are never touched.
+;  the user's settings and sessions in %APPDATA%\FeTerm are never touched.
 ; ---------------------------------------------------------------------------
 #ifndef AppVersion
   #error Pass /DAppVersion=X.Y.Z
