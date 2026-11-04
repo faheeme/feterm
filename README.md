@@ -194,7 +194,7 @@ on Wayland and X11.
 Run from the source tree with `./feterm`: themes are found in `./data` next to the binary.
 
 The Windows build is cross-compiled on Linux in Docker: `packaging/windows/build.sh` (see
-`packaging/README.md`).
+`packaging/README.md`; `--label NAME` makes a test build of uncommitted changes).
 
 Warnings are errors by default. `make WERROR=` turns that off, for example when a newer
 compiler adds a warning. The distribution packages in `packaging/` (AUR, COPR, PPA) build

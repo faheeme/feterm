@@ -41,9 +41,11 @@ a user's build.
    series gets its own upload, `X.Y.Z-1~ppa1~26.04.1` and `~26.10.1`, built against its own
    libraries, so nothing has to be copied between series on Launchpad.
 
-5. **Windows:** `packaging/windows/build.sh`, then attach `dist/feterm-X.Y.Z-windows-x64.zip`,
-   `dist/feterm-X.Y.Z-windows-x64-setup.exe` and `dist/SHA256SUMS` to the GitLab release and
-   update winget (see *Windows* below).
+5. **Windows and macOS:** with the `vX.Y.Z` tag checked out, run `packaging/windows/build.sh`.
+   GitHub builds the macOS DMGs from the tag; download them into `dist/`
+   (`gh release download vX.Y.Z -R faheeme/feterm -p '*.dmg' -D dist`), run
+   `packaging/windows/build.sh --sums` so `SHA256SUMS` covers them too, then attach all five
+   files to the GitLab release and update winget (see *Windows* below).
 6. **Alpine:** set `pkgver=X.Y.Z`, `pkgrel=0` in `alpine/APKBUILD` (and drop patches the
    release contains), then build, sign and publish the repo (see *Alpine* below).
 
@@ -116,7 +118,17 @@ and writes to `dist/`:
 |---|---|
 | `feterm-X.Y.Z-windows-x64.zip` | portable: unzip anywhere and run `feterm.exe` |
 | `feterm-X.Y.Z-windows-x64-setup.exe` | installer: per user without admin rights, or for all users |
-| `SHA256SUMS` | checksums of both |
+| `SHA256SUMS` | checksums of every `feterm-X.Y.Z-*` release file in `dist/` (Windows, and the macOS DMGs once downloaded) |
+
+A release build only runs at the `vX.Y.Z` tag with no uncommitted changes, and won't replace
+`dist/` files that already exist (they may be published) unless you pass `--force`. Other
+options:
+
+- `--label NAME` builds the working tree as it is, uncommitted changes included, for testing:
+  `feterm-X.Y.Z-NAME-windows-x64.zip` and `-setup.exe`, with their own `SHA256SUMS-X.Y.Z-NAME`.
+  It never touches the release files. The installer still upgrades an installed FeTerm (same
+  `AppId`), so test with the zip if you want to keep the installed version.
+- `--sums` only rewrites `SHA256SUMS`, e.g. after downloading the DMGs.
 
 Both hold `feterm.exe`, `feterm-helper.exe` (the Telnet and serial clients, a console
 program), the DLLs they need (found by `windows/stage.sh` from their imports, including
@@ -137,7 +149,8 @@ After `glab release create` (step 1):
 
 ```sh
 glab release upload vX.Y.Z dist/feterm-X.Y.Z-windows-x64.zip \
-    dist/feterm-X.Y.Z-windows-x64-setup.exe dist/SHA256SUMS
+    dist/feterm-X.Y.Z-windows-x64-setup.exe dist/feterm-X.Y.Z-macos-arm64.dmg \
+    dist/feterm-X.Y.Z-macos-x86_64.dmg dist/SHA256SUMS
 ```
 
 ### winget
