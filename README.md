@@ -11,7 +11,7 @@ and `DISPLAY_NAME` (window title, `--version`, `TERM_PROGRAM`).
 Juniper and a shared network profile), click-to-position, selection and copy, mouse
 reporting, links, scrollback search, reflow, configurable keys, live reload, tabs and split
 panes, the kitty keyboard protocol, desktop notifications, drawn box characters, cursor
-animation, 14 themes, true transparency, and inline images (sixel and kitty graphics).
+animation, 15 themes, true transparency, and inline images (sixel and kitty graphics).
 The sidebar has a session manager (SSH, Telnet, serial and local sessions in folders, with
 keepalives, anti-idle and reconnect) and a remote file explorer (SFTP, with an SCP fallback).
 
