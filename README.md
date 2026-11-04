@@ -11,7 +11,7 @@ and `DISPLAY_NAME` (window title, `--version`, `TERM_PROGRAM`).
 Juniper and a shared network profile), click-to-position, selection and copy, mouse
 reporting, links, scrollback search, reflow, configurable keys, live reload, tabs and split
 panes, the kitty keyboard protocol, desktop notifications, drawn box characters, cursor
-animation, 14 themes, true transparency, and inline images (sixel and kitty graphics).
+animation, 15 themes, true transparency, and inline images (sixel and kitty graphics).
 The sidebar has a session manager (SSH, Telnet, serial and local sessions in folders, with
 keepalives, anti-idle and reconnect) and a remote file explorer (SFTP, with an SCP fallback).
 
@@ -111,10 +111,10 @@ says "not recognized", add it under **Settings → System → Optional features 
 Client**. Telnet and serial sessions need nothing extra.
 
 Differences from Linux:
-- **The Files tab asks for the password a second time.** Windows' OpenSSH can't share one
-  login between connections (no ControlMaster), so the Files tab logs in separately. With
-  SSH keys and the agent (the "OpenSSH Authentication Agent" service, then `ssh-add`) neither
-  login asks.
+- **The Files tab and cloned sessions ask for the password again.** Windows' OpenSSH can't
+  share one login between connections (no ControlMaster), so the Files tab and each clone
+  (Ctrl+Shift+Alt+T / E / O) log in separately. With SSH keys or certificates and the agent
+  (the "OpenSSH Authentication Agent" service, then `ssh-add`) none of these logins ask.
 - `ssh` typed by hand in a PowerShell or cmd tab doesn't open the Files tab (the same as on
   Linux). Use a session or Quick Connect.
 
@@ -224,6 +224,7 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Ctrl+Shift+R | reload configuration (also automatic when files change) |
 | Ctrl+Shift+T / Ctrl+Shift+W | new tab / close pane (closing the last pane closes the tab) |
 | Ctrl+Shift+E / Ctrl+Shift+O | split right / split down (new panes start in the current directory) |
+| Ctrl+Shift+Alt+T / E / O | clone the focused session into a new tab / split right / split down (SSH reuses the login: no second password, except on Windows) |
 | Ctrl+Tab, Ctrl+PgDn / Ctrl+Shift+Tab, Ctrl+PgUp, Alt+1..9 | next / previous / numbered tab |
 | Ctrl+Shift+] / [ , click | focus next / previous pane |
 | Ctrl+Shift+Alt+arrows, drag a divider | resize panes |
@@ -247,6 +248,7 @@ On macOS the defaults use Cmd instead:
 | Cmd+Option+Up / Down, Cmd+Home / End | scroll by line / to the top or bottom |
 | Cmd+T / Cmd+W | new tab / close pane |
 | Cmd+D / Cmd+Shift+D | split right / split down |
+| Cmd+Option+T / Cmd+Option+D / Cmd+Option+Shift+D | clone the focused session into a new tab / split right / split down |
 | Cmd+Shift+] / [ , Ctrl+Tab, Cmd+1..9 | next / previous / numbered tab |
 | Cmd+] / Cmd+[ | focus next / previous pane |
 | Ctrl+Cmd+arrows | resize panes |

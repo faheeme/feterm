@@ -149,6 +149,10 @@ goto_tab_8 = alt+8
 goto_tab_9 = alt+9
 split_right = ctrl+shift+e
 split_down = ctrl+shift+o
+; Open the focused session again (SSH shares the login) in a tab or split
+clone_tab = ctrl+shift+alt+t
+clone_split_right = ctrl+shift+alt+e
+clone_split_down = ctrl+shift+alt+o
 focus_next_pane = ctrl+shift+bracketright
 focus_prev_pane = ctrl+shift+bracketleft
 resize_left = ctrl+shift+alt+left

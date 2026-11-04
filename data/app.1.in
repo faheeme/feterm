@@ -88,6 +88,10 @@ New tab, close pane.
 .B Ctrl+Shift+E, Ctrl+Shift+O
 Split right, split down.
 .TP
+.B Ctrl+Shift+Alt+T, Ctrl+Shift+Alt+E, Ctrl+Shift+Alt+O
+Clone the focused session into a new tab, a split on the right, or a split below.
+SSH clones share the existing login.
+.TP
 .B Ctrl+Shift+H
 Cycle highlighting: auto, off, then each profile.
 .TP

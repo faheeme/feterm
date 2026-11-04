@@ -50,6 +50,9 @@ typedef enum te_action {
     TE_ACT_SIDEBAR_FILES,
     TE_ACT_QUICK_CONNECT,
     TE_ACT_SEND_BREAK,
+    TE_ACT_CLONE_TAB,               /* the focused pane's session again, in a new tab */
+    TE_ACT_CLONE_SPLIT_RIGHT,
+    TE_ACT_CLONE_SPLIT_DOWN,
     TE_ACT_COUNT,
 } te_action;
 
