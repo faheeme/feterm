@@ -46,6 +46,9 @@ static const char *const action_names[TE_ACT_COUNT] = {
     [TE_ACT_SIDEBAR_FILES] = "sidebar_files",
     [TE_ACT_QUICK_CONNECT] = "quick_connect",
     [TE_ACT_SEND_BREAK] = "send_break",
+    [TE_ACT_CLONE_TAB] = "clone_tab",
+    [TE_ACT_CLONE_SPLIT_RIGHT] = "clone_split_right",
+    [TE_ACT_CLONE_SPLIT_DOWN] = "clone_split_down",
 };
 
 typedef struct key_name {
@@ -136,6 +139,10 @@ void keymap_defaults(te_keymap *m)
     /* Mac keyboards have no Pause key; Ctrl+Pause still works on one that does. */
     bind(m, TE_ACT_SEND_BREAK, 0, TE_KEY_CHAR, 'b', co);
     bind(m, TE_ACT_SEND_BREAK, 1, TE_KEY_PAUSE, 0, TE_MOD_CTRL);
+    /* Clone the session: the new-tab and split keys plus Option. */
+    bind(m, TE_ACT_CLONE_TAB, 0, TE_KEY_CHAR, 't', co);
+    bind(m, TE_ACT_CLONE_SPLIT_RIGHT, 0, TE_KEY_CHAR, 'd', co);
+    bind(m, TE_ACT_CLONE_SPLIT_DOWN, 0, TE_KEY_CHAR, 'd', co | TE_MOD_SHIFT);
 }
 #else
 void keymap_defaults(te_keymap *m)
@@ -185,6 +192,11 @@ void keymap_defaults(te_keymap *m)
     bind(m, TE_ACT_QUICK_CONNECT, 0, TE_KEY_CHAR, 'n', cs);
     bind(m, TE_ACT_SEND_BREAK, 0, TE_KEY_PAUSE, 0, cs);
     bind(m, TE_ACT_SEND_BREAK, 1, TE_KEY_PAUSE, 0, TE_MOD_CTRL);
+    /* Clone the session: the new-tab and split keys plus Alt. (Ctrl+Shift+I is
+     * kept free for sending input to all panes.) */
+    bind(m, TE_ACT_CLONE_TAB, 0, TE_KEY_CHAR, 't', cs | TE_MOD_ALT);
+    bind(m, TE_ACT_CLONE_SPLIT_RIGHT, 0, TE_KEY_CHAR, 'e', cs | TE_MOD_ALT);
+    bind(m, TE_ACT_CLONE_SPLIT_DOWN, 0, TE_KEY_CHAR, 'o', cs | TE_MOD_ALT);
 }
 #endif
 

@@ -707,9 +707,11 @@ static void host_sb_copy(void *user, const char *text)
     show_toast(a, "Copied");
 }
 
-static void host_sb_connect(void *user, const te_session *s, const te_session_eff *eff, bool split_pane)
+typedef enum { OPEN_TAB, OPEN_SPLIT_RIGHT, OPEN_SPLIT_DOWN } open_where;
+
+/* Start a session in a new pane: a new tab, or a split of the focused pane. */
+static void open_session(app *a, const te_session *s, const te_session_eff *eff, open_where where)
 {
-    app *a = user;
     char msg[160] = { 0 };
     te_pane_session *ps = te_calloc(1, sizeof *ps);
     if (ps == nullptr) {
@@ -742,7 +744,8 @@ static void host_sb_connect(void *user, const te_session *s, const te_session_ef
     p->started_ms = plat_ticks_ms();
     p->last_input_ms = p->started_ms;
     apply_session_highlight(p, s);
-    te_err lr = split_pane && focus_pane(a) != nullptr ? layout_split(&a->layout, p, true) : layout_add_tab(&a->layout, p);
+    bool split_pane = where != OPEN_TAB && focus_pane(a) != nullptr;
+    te_err lr = split_pane ? layout_split(&a->layout, p, where == OPEN_SPLIT_RIGHT) : layout_add_tab(&a->layout, p);
     if (lr != TE_OK) {
         show_toast(a, split_pane ? "Too many panes in this tab" : "Too many tabs");
         if (p->tag >= 0) {
@@ -757,6 +760,37 @@ static void host_sb_connect(void *user, const te_session *s, const te_session_ef
         show_banner(a, p);
     }
     update_window_title(a);
+}
+
+static void host_sb_connect(void *user, const te_session *s, const te_session_eff *eff, bool split_pane)
+{
+    open_session(user, s, eff, split_pane ? OPEN_SPLIT_RIGHT : OPEN_TAB);
+}
+
+/*
+ * Open the focused pane's session again. SSH shares the existing login where
+ * connection sharing is on, so the copy needs no second password; a plain
+ * shell gets a new shell in the same directory.
+ */
+static void clone_pane(app *a, open_where where)
+{
+    te_pane *f = focus_pane(a);
+    if (f == nullptr || f->sess == nullptr) {
+        if (where == OPEN_TAB) {
+            new_tab(a);
+        } else {
+            split(a, where == OPEN_SPLIT_RIGHT);
+        }
+        return;
+    }
+    if (f->sess->s.type == TE_SESS_SERIAL) {
+        show_toast(a, "A serial port can't be opened twice");
+        return;
+    }
+    /* Copy first: opening may change the focus, and the pane owns f->sess. */
+    te_session s = f->sess->s;
+    te_session_eff eff = f->sess->eff;
+    open_session(a, &s, &eff, where);
 }
 
 static void pane_note(te_pane *p, const char *msg)
@@ -1417,6 +1451,9 @@ static void do_action(app *a, te_action act)
         break;
     case TE_ACT_SPLIT_RIGHT:      split(a, true); break;
     case TE_ACT_SPLIT_DOWN:       split(a, false); break;
+    case TE_ACT_CLONE_TAB:        clone_pane(a, OPEN_TAB); break;
+    case TE_ACT_CLONE_SPLIT_RIGHT: clone_pane(a, OPEN_SPLIT_RIGHT); break;
+    case TE_ACT_CLONE_SPLIT_DOWN: clone_pane(a, OPEN_SPLIT_DOWN); break;
     case TE_ACT_FOCUS_NEXT_PANE:  layout_cycle_focus(&a->layout, 1); update_window_title(a); break;
     case TE_ACT_FOCUS_PREV_PANE:  layout_cycle_focus(&a->layout, -1); update_window_title(a); break;
     case TE_ACT_RESIZE_LEFT:      if (layout_resize(&a->layout, -1, 0, RESIZE_STEP)) relayout(a); break;

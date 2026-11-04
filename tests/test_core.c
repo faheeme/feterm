@@ -1211,6 +1211,10 @@ static void test_keymap(void)
     CHECK(keymap_lookup(&k, TE_KEY_LEFT, 0, cmd | TE_MOD_CTRL) == TE_ACT_RESIZE_LEFT);
     CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'b', cmd | TE_MOD_ALT) == TE_ACT_SEND_BREAK);
     CHECK(keymap_lookup(&k, TE_KEY_INSERT, 0, TE_MOD_SHIFT) == TE_ACT_NONE);   /* no primary selection */
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 't', cmd | TE_MOD_ALT) == TE_ACT_CLONE_TAB);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'd', cmd | TE_MOD_ALT) == TE_ACT_CLONE_SPLIT_RIGHT);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'd', cmd | TE_MOD_ALT | TE_MOD_SHIFT) == TE_ACT_CLONE_SPLIT_DOWN);
+    CHECK(keymap_describe(&k, TE_ACT_CLONE_TAB, d, sizeof d) == TE_OK && strcmp(d, "Option+Cmd+T") == 0);
     CHECK(keymap_describe(&k, TE_ACT_CLOSE_PANE, d, sizeof d) == TE_OK && strcmp(d, "Cmd+W") == 0);
     CHECK(keymap_describe(&k, TE_ACT_QUICK_CONNECT, d, sizeof d) == TE_OK && strcmp(d, "Shift+Cmd+N") == 0);
     CHECK(keymap_describe(&k, TE_ACT_PASTE_PRIMARY, d, sizeof d) == TE_ERR_NOTFOUND && d[0] == '\0');
@@ -1221,7 +1225,32 @@ static void test_keymap(void)
     CHECK(keymap_lookup(&k, TE_KEY_CHAR, '1', TE_MOD_ALT) == TE_ACT_GOTO_TAB_1);
     CHECK(keymap_describe(&k, TE_ACT_CLOSE_PANE, d, sizeof d) == TE_OK && strcmp(d, "Ctrl+Shift+W") == 0);
     CHECK(keymap_describe(&k, TE_ACT_SEND_BREAK, d, sizeof d) == TE_OK && strcmp(d, "Ctrl+Shift+Pause") == 0);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 't', cs) == TE_ACT_NEW_TAB);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 't', cs | TE_MOD_ALT) == TE_ACT_CLONE_TAB);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'E', cs | TE_MOD_ALT) == TE_ACT_CLONE_SPLIT_RIGHT);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'o', cs | TE_MOD_ALT) == TE_ACT_CLONE_SPLIT_DOWN);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'i', cs) == TE_ACT_NONE);   /* reserved: send input to all panes */
+    CHECK(keymap_describe(&k, TE_ACT_CLONE_SPLIT_DOWN, d, sizeof d) == TE_OK && strcmp(d, "Ctrl+Alt+Shift+O") == 0);
 #endif
+    /* No two default shortcuts are the same key. */
+    {
+        size_t clashes = 0;
+        for (size_t a1 = 1; a1 < TE_ACT_COUNT; a1++) {
+            for (size_t i1 = 0; i1 < TE_KEYBIND_SLOTS; i1++) {
+                const te_keybind *x = &k.b[a1][i1];
+                if (x->key == TE_KEY_NONE) continue;
+                for (size_t a2 = a1; a2 < TE_ACT_COUNT; a2++) {
+                    for (size_t i2 = (a2 == a1 ? i1 + 1 : 0); i2 < TE_KEYBIND_SLOTS; i2++) {
+                        const te_keybind *y = &k.b[a2][i2];
+                        if (y->key == x->key && y->mods == x->mods && y->cp == x->cp) clashes++;
+                    }
+                }
+            }
+        }
+        CHECK(clashes == 0);
+    }
+    CHECK(keymap_set(&k, "clone_tab", "ctrl+alt+d") == TE_OK);
+    CHECK(keymap_lookup(&k, TE_KEY_CHAR, 'd', TE_MOD_CTRL | TE_MOD_ALT) == TE_ACT_CLONE_TAB);
     CHECK(keymap_lookup(&k, TE_KEY_PAGE_UP, 0, TE_MOD_SHIFT) == TE_ACT_SCROLL_PAGE_UP);
     /* Mac spellings of the modifiers work on every platform. */
     CHECK(keymap_set(&k, "new_tab", "cmd+shift+t, command+t") == TE_OK);
