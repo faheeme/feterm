@@ -1,3 +1,11 @@
+feterm (0.5.4-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: the focused session can be cloned into a new
+    tab or split (Ctrl+Shift+Alt+T, E and O); SSH clones reuse the
+    existing login. Adds a new green theme, Absinthe.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Wed, 04 Nov 2026 11:04:46 +0200
+
 feterm (0.5.3-1~ppa1) resolute; urgency=medium
 
   * New upstream release: the scrollbar can be dragged (it appears when
