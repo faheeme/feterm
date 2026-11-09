@@ -298,9 +298,13 @@ or press Ctrl+Shift+B to collapse it to a thin strip.
 - **Keyboard:** type in the filter box to find sessions by name, host or folder. Up/Down
   select, Enter connects (Shift+Enter in a split), Left/Right close and open folders, F2
   renames, Delete deletes (after asking) and Shift+F10 opens the menu.
-- **Folder settings:** a folder's colour, default user and anti-idle setting apply to
-  everything inside it unless a session sets its own. A session's colour shows as a stripe
-  on its tab (e.g. red for production).
+- **Folder settings:** a folder's colour, vendor logo, default user and anti-idle setting
+  apply to everything inside it unless a session sets its own. A session's colour shows as
+  a stripe on its tab (e.g. red for production).
+- **Vendor logos:** pick a "Vendor / OS" (Cisco, Arista, Juniper, FortiGate, Palo Alto,
+  Fedora, RHEL, Rocky, Alpine, Arch, Ubuntu, Windows and more; type a letter to jump) and
+  its logo shows before the session's name. The dot on the logo shows the connection:
+  green while connected, red when the connection dropped or failed, grey when not open.
 - **Staying connected:**
   - SSH and TCP keepalives stop firewalls from dropping idle sessions.
   - Anti-idle stops the device's own idle logout (Cisco `exec-timeout`, Linux `TMOUT`):
@@ -419,6 +423,11 @@ The icons in `data/icons/` and the window icon compiled into the binary
 need no extra tools. X11 and Wayland compositors that support xdg-toplevel-icon (KDE, for
 example) show the window icon; GNOME takes the icon from the launcher entry instead. The
 "FeTerm>_" lettering is JetBrains Mono Bold (SIL Open Font License) converted to outlines.
+
+The vendor logos (`src/ui/logo_data.h`, also pre-rendered and committed) are monochrome marks from
+[Simple Icons](https://simpleicons.org), plus drawn generic icons and letter badges for brands
+Simple Icons does not carry. They are trademarks of their owners, shown only to identify a
+session's platform. Sources and licences: [data/logos/NOTICE](data/logos/NOTICE).
 
 Configuration: copy `data/config.ini.example` to `~/.config/feterm/config.ini`.
 Themes: `data/themes/*.ini`, or your own in `~/.config/feterm/themes/`.

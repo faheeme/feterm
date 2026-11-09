@@ -15,6 +15,7 @@
 #define TE_SESS_PATH_MAX   1024
 #define TE_SESS_FOLDER_MAX 512     /* relative folder path, '/'-separated */
 #define TE_SESS_DEPTH_MAX  8       /* folder nesting */
+#define TE_SESS_VENDOR_MAX 23      /* logo slug: [a-z0-9-] */
 #define TE_ANTI_IDLE_INHERIT (-1)
 #define TE_ANTI_IDLE_MAX   86400
 
@@ -58,6 +59,7 @@ typedef struct te_session {
     te_tag_color  color;
     int32_t       anti_idle;       /* seconds; 0 off; TE_ANTI_IDLE_INHERIT */
     char          highlight[64];   /* "" or "auto": detect; else a profile name */
+    char          vendor[TE_SESS_VENDOR_MAX + 1];   /* logo in the sidebar; "": from the folder */
 } te_session;
 
 /* Defaults a folder passes to everything inside it (_folder.ini). */
@@ -65,6 +67,7 @@ typedef struct te_folder_defaults {
     te_tag_color color;            /* TE_TAG_INHERIT: from the parent */
     int32_t      anti_idle;        /* TE_ANTI_IDLE_INHERIT: from the parent */
     char         user[TE_SESS_USER_MAX + 1];   /* "": from the parent */
+    char         vendor[TE_SESS_VENDOR_MAX + 1];   /* "": from the parent */
 } te_folder_defaults;
 
 void session_defaults(te_session *s, te_sess_type type);
@@ -89,6 +92,8 @@ uint16_t session_default_port(te_sess_type t);
 [[nodiscard]] bool session_user_valid(const char *user);
 /* A value safe to store and pass as one argv element: printable, no leading '-'. */
 [[nodiscard]] bool session_value_safe(const char *v);
+/* A vendor (logo) slug: "" or 1..TE_SESS_VENDOR_MAX of [a-z0-9-]. Unknown slugs are kept as they are. */
+[[nodiscard]] bool session_vendor_valid(const char *v);
 
 /* What a serial device name looks like here, for hints and examples. */
 #ifdef _WIN32

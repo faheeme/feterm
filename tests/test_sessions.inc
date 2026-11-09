@@ -11,6 +11,7 @@
 #include "sessions/store.h"
 #include "sessions/telnet.h"
 #include "ui/form.h"
+#include "ui/logo.h"
 #include "ui/menu.h"
 #include "ui/paint.h"
 #include "ui/sidebar.h"
@@ -182,7 +183,28 @@ static void test_session_store(void)
         te_session_eff eff;
         store_effective(&st, st.nodes[si].sess, &eff);
         CHECK(eff.color == TE_TAG_RED && eff.anti_idle == 60 && strcmp(eff.user, "netops") == 0);
+        CHECK(eff.vendor[0] == '\0');   /* none set anywhere */
     }
+    /* Vendor logos inherit like the colour, and a session's own wins. */
+    (void)str_copy(d.vendor, sizeof d.vendor, "cisco");
+    CHECK(store_save_folder_defaults(&st, "Datacenter", &d) == TE_OK);
+    si = store_find_session(&st, "Datacenter/Core", "core-sw1");
+    if (si >= 0) {
+        te_session_eff eff;
+        store_effective(&st, st.nodes[si].sess, &eff);
+        CHECK(strcmp(eff.vendor, "cisco") == 0);
+        te_session own = *st.nodes[si].sess;
+        (void)str_copy(own.vendor, sizeof own.vendor, "arista");
+        CHECK(store_save_session(&st, &own, own.folder, own.name) == TE_OK);
+        si = store_find_session(&st, "Datacenter/Core", "core-sw1");
+        CHECK(si >= 0 && strcmp(st.nodes[si].sess->vendor, "arista") == 0);
+        if (si >= 0) {
+            store_effective(&st, st.nodes[si].sess, &eff);
+            CHECK(strcmp(eff.vendor, "arista") == 0);
+        }
+    }
+    int dfi = store_find_folder(&st, "Datacenter");
+    CHECK(dfi >= 0 && strcmp(st.nodes[dfi].fdef.vendor, "cisco") == 0);   /* reloaded from _folder.ini */
 
     /* Rename, move, keep folders open. */
     int fi = store_find_folder(&st, "Datacenter");
@@ -527,6 +549,77 @@ static void sb_connect(void *u, const te_session *s, const te_session_eff *e, bo
     g_connects++;
 }
 
+static int g_icon_calls;
+static uint32_t g_dot_colors[8];
+static size_t g_ndots;
+
+static void rec_icon(void *u, te_layer l, float x, float y, float size, int logo, uint32_t rgb)
+{
+    (void)u; (void)l; (void)x; (void)y; (void)size;
+    g_icon_calls++;
+    if (logo == logo_dot() && g_ndots < TE_ARRAY_LEN(g_dot_colors)) {
+        g_dot_colors[g_ndots++] = rgb;
+    }
+}
+
+static void test_logos(void)
+{
+    CHECK(logo_count() >= 30);
+    CHECK(strcmp(logo_slug(TE_LOGO_DEFAULT), "terminal") == 0);
+    CHECK(logo_find("cisco") >= 0 && logo_find("fedora") >= 0 && logo_find("arista") >= 0);
+    CHECK(logo_find("") < 0 && logo_find("no-such-vendor") < 0 && logo_find(nullptr) < 0);
+    CHECK(strcmp(logo_slug(-1), "") == 0 && strcmp(logo_name((int)logo_count()), "") == 0);
+    for (size_t i = 0; i < logo_count(); i++) {
+        CHECK(logo_slug_valid(logo_slug((int)i)) && session_vendor_valid(logo_slug((int)i)));
+        CHECK(logo_find(logo_slug((int)i)) == (int)i);   /* unique */
+        CHECK(logo_name((int)i)[0] != '\0');
+    }
+    CHECK(!logo_slug_valid("") && !logo_slug_valid("Cisco") && !logo_slug_valid("a b") &&
+          !logo_slug_valid("abcdefghijklmnopqrstuvwxyz"));
+    CHECK(session_vendor_valid("") && !session_vendor_valid("../x") && !session_vendor_valid("UPPER"));
+
+    /* Scaling stays inside the buffer for every size, clamps large sizes and refuses small buffers. */
+    static uint8_t buf[TE_LOGO_PX_MAX * TE_LOGO_PX_MAX + 1];
+    static const int sizes[] = { 1, 7, 16, 24, 37, 48, 200, 0, -5 };
+    for (size_t i = 0; i < TE_ARRAY_LEN(sizes); i++) {
+        buf[sizeof buf - 1] = 0xA5;
+        int n = logo_render(logo_find("cisco"), sizes[i], buf, sizeof buf - 1);
+        CHECK(n >= 1 && n <= TE_LOGO_PX_MAX && buf[sizeof buf - 1] == 0xA5);
+    }
+    uint8_t small[16] = { 0 };
+    CHECK(logo_render(0, 16, small, sizeof small) == 0);
+    CHECK(logo_render(-1, 16, buf, sizeof buf) == 0 && logo_render(logo_dot() + 1, 16, buf, sizeof buf) == 0);
+    CHECK(logo_render(0, 16, nullptr, 0) == 0);
+    /* The dot is a full circle: solid centre, empty corner. */
+    CHECK(logo_render(logo_dot(), 16, buf, sizeof buf) == 16);
+    CHECK(buf[8 * 16 + 8] > 250 && buf[0] < 5);
+
+    /* A vendor slug round-trips through a session file; a bad one is rejected. */
+    te_session s;
+    session_defaults(&s, TE_SESS_SSH);
+    CHECK(session_parse_kv(&s, "session", "vendor", "future-vendor") == TE_OK);
+    CHECK(strcmp(s.vendor, "future-vendor") == 0);
+    CHECK(session_parse_kv(&s, "session", "vendor", "Bad Vendor") == TE_ERR_PARSE);
+    CHECK(strcmp(s.vendor, "future-vendor") == 0);
+    (void)str_copy(s.name, sizeof s.name, "x");
+    (void)str_copy(s.host, sizeof s.host, "192.0.2.1");
+    char text[4096] = { 0 };
+    CHECK(session_serialize(&s, text, sizeof text) == TE_OK && strstr(text, "vendor = future-vendor\n") != nullptr);
+
+    /* Typing a letter on a choice jumps to the next choice starting with it. */
+    static const char *const ch[] = { "Inherit", "Cisco", "Arista", "CentOS" };
+    te_form f;
+    form_init(&f, 1, "t", "OK");
+    form_set_choices(form_add(&f, 1, TE_FIELD_CHOICE, "Vendor", nullptr), ch, TE_ARRAY_LEN(ch), 0);
+    form_focus_first(&f);
+    f.open = true;
+    CHECK(form_text(&f, "c") == TE_FORM_CHANGED && form_choice(&f, 1) == 1);
+    CHECK(form_text(&f, "C") == TE_FORM_CHANGED && form_choice(&f, 1) == 3);
+    CHECK(form_text(&f, "c") == TE_FORM_CHANGED && form_choice(&f, 1) == 1);   /* wraps */
+    CHECK(form_text(&f, "z") == TE_FORM_NONE && form_choice(&f, 1) == 1);
+    CHECK(form_text(&f, "\xc3\xa9") == TE_FORM_NONE);
+}
+
 static void test_sidebar_rules(void)
 {
     char root[512];
@@ -582,8 +675,32 @@ static void test_sidebar_rules(void)
 
     g_paint_calls = 0;
     te_ui_colors uc = { 0 };
+    uc.muted = 0x777777;
     sidebar_draw(&sb, &p, &uc);
     CHECK(g_paint_calls > 10);
+
+    /* Each session row: a logo plus a status dot (grey until it is open). */
+    p.icon = rec_icon;
+    g_icon_calls = 0;
+    g_ndots = 0;
+    sidebar_live_begin(&sb);
+    sidebar_draw(&sb, &p, &uc);
+    CHECK(g_icon_calls == 3 && g_ndots == 2 && g_dot_colors[1] == 0x777777);   /* logo, ring, dot */
+    sidebar_live_mark(&sb, "", "beta", TE_LIVE_UP);
+    g_ndots = 0;
+    sidebar_draw(&sb, &p, &uc);
+    CHECK(g_ndots == 2 && g_dot_colors[1] == 0x22C55E);
+    sidebar_live_mark(&sb, "", "beta", TE_LIVE_DOWN);
+    sidebar_live_mark(&sb, "", "beta", TE_LIVE_UP);   /* a dropped pane outweighs a live one */
+    g_ndots = 0;
+    sidebar_draw(&sb, &p, &uc);
+    CHECK(g_ndots == 2 && g_dot_colors[1] == 0xEF4444);
+    sidebar_live_mark(&sb, "", "no-such", TE_LIVE_UP);   /* unknown sessions are ignored */
+    sidebar_live_begin(&sb);
+    g_ndots = 0;
+    sidebar_draw(&sb, &p, &uc);
+    CHECK(g_ndots == 2 && g_dot_colors[1] == 0x777777);
+    p.icon = nullptr;
     sidebar_toggle(&sb);
     sidebar_layout(&sb, &p, 1200.0f, 700.0f);
     CHECK(!sb.visible && sidebar_width(&sb) == 24.0f);            /* the collapsed strip */
@@ -613,5 +730,6 @@ static void test_sessions_all(void)
     test_launch_argv();
     test_telnet_protocol();
     test_ui_widgets();
+    test_logos();
     test_sidebar_rules();
 }

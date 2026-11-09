@@ -21,6 +21,9 @@
 
 #define TE_STORE_MAX_NODES 10000
 
+/* Whether a saved session is open in a pane, for the sidebar's status dot. */
+typedef enum { TE_LIVE_CLOSED, TE_LIVE_UP, TE_LIVE_DOWN } te_live_state;
+
 typedef struct te_store_node {
     bool                folder;
     bool                expanded;     /* folders: shown open in the tree */
@@ -30,6 +33,7 @@ typedef struct te_store_node {
     char                path[TE_SESS_FOLDER_MAX + 1];  /* folder: its own path; session: its folder */
     te_folder_defaults  fdef;         /* folders only */
     te_session         *sess;         /* sessions only (owned) */
+    uint8_t             live;         /* sessions: te_live_state, set by the app each frame, never saved */
 } te_store_node;
 
 typedef struct te_store {
@@ -64,11 +68,12 @@ bool store_session_exists(const te_store *st, const char *folder, const char *na
 [[nodiscard]] te_err store_delete_folder(te_store *st, const char *path);
 [[nodiscard]] te_err store_save_folder_defaults(te_store *st, const char *path, const te_folder_defaults *d);
 
-/* Effective colour, anti-idle and user of a session after folder inheritance. */
+/* Effective colour, anti-idle, user and vendor of a session after folder inheritance. */
 typedef struct te_session_eff {
     te_tag_color color;
     int32_t      anti_idle;      /* TE_ANTI_IDLE_INHERIT: use the global setting */
     char         user[TE_SESS_USER_MAX + 1];
+    char         vendor[TE_SESS_VENDOR_MAX + 1];   /* "": none set anywhere (generic logo) */
 } te_session_eff;
 void store_effective(const te_store *st, const te_session *s, te_session_eff *out);
 

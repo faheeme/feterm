@@ -31,6 +31,8 @@ typedef struct te_form_field {
     const char *const  *choices;      /* not owned; must outlive the form */
     size_t              nchoices;
     size_t              choice;
+    bool                icons;        /* choices: show logo (ui/logo.h) i - icon_skip before choice i */
+    size_t              icon_skip;
     bool                checked;
     bool                hidden;
 } te_form_field;

@@ -493,6 +493,7 @@ void store_effective(const te_store *st, const te_session *s, te_session_eff *ou
     out->color = s->color;
     out->anti_idle = s->anti_idle;
     (void)str_copy(out->user, sizeof out->user, s->user);
+    (void)str_copy(out->vendor, sizeof out->vendor, s->vendor);
     char path[TE_SESS_FOLDER_MAX + 1] = { 0 };
     (void)str_copy(path, sizeof path, s->folder);
     /* Walk from the session's folder up to the top, filling what is still unset. */
@@ -503,6 +504,9 @@ void store_effective(const te_store *st, const te_session *s, te_session_eff *ou
             if (out->color == TE_TAG_INHERIT && d->color != TE_TAG_INHERIT) out->color = d->color;
             if (out->anti_idle == TE_ANTI_IDLE_INHERIT) out->anti_idle = d->anti_idle;
             if (out->user[0] == '\0' && d->user[0] != '\0') (void)str_copy(out->user, sizeof out->user, d->user);
+            if (out->vendor[0] == '\0' && d->vendor[0] != '\0') {
+                (void)str_copy(out->vendor, sizeof out->vendor, d->vendor);
+            }
         }
         char *slash = strrchr(path, '/');
         if (slash == nullptr) {

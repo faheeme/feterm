@@ -882,6 +882,22 @@ static bool disconnected_key(app *a, te_pane *p, te_key key)
 
 /* Keep-awake bytes for sessions the user has not typed into for a while.
  * Returns the milliseconds until the next one is due, or -1. */
+/* Status dots in the sidebar: which saved sessions are open, and whether they are up. */
+static void sidebar_live_sync(app *a)
+{
+    sidebar_live_begin(&a->sb);
+    te_pane *all[MAX_PANES] = { 0 };
+    size_t n = layout_all_panes(&a->layout, all, TE_ARRAY_LEN(all));
+    for (size_t i = 0; i < n; i++) {
+        const te_pane *p = all[i];
+        if (p->sess == nullptr || (p->exited && p->status == 0 && !p->disconnected)) {
+            continue;   /* ended normally: shown as closed */
+        }
+        bool down = p->disconnected || p->exited;
+        sidebar_live_mark(&a->sb, p->sess->s.folder, p->sess->s.name, down ? TE_LIVE_DOWN : TE_LIVE_UP);
+    }
+}
+
 static int service_anti_idle(app *a, uint64_t now)
 {
     if (a->cfg.anti_idle_len == 0) {
@@ -2404,6 +2420,7 @@ static void render(app *a, uint64_t now)
         te_painter painter;
         renderer_painter(a->ren, a->scale, &painter);
         layout_sidebar(a);
+        sidebar_live_sync(a);
         renderer_ui_begin(a->ren);
         sidebar_draw(&a->sb, &painter, &uc);
         renderer_ui_end(a->ren);

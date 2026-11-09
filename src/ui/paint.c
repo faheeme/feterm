@@ -87,3 +87,10 @@ void ui_frame(const te_painter *p, te_layer layer, float x, float y, float w, fl
     ui_rect(p, layer, x, y, t, h, rgb, 1.0f);
     ui_rect(p, layer, x + w - t, y, t, h, rgb, 1.0f);
 }
+
+void ui_icon(const te_painter *p, te_layer layer, float x, float y, float size, int logo, uint32_t rgb)
+{
+    if (p != nullptr && p->icon != nullptr && size >= 1.0f) {
+        p->icon(p->user, layer, x, y, size, logo, rgb);
+    }
+}

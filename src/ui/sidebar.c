@@ -3,6 +3,7 @@
 #include <string.h>
 #include <strings.h>
 
+#include "ui/logo.h"
 #include "util/log.h"
 #include "util/mem.h"
 #include "util/str.h"
@@ -30,7 +31,7 @@ enum {
 enum {
     FD_NAME = 1, FD_FOLDER, FD_TYPE, FD_HOST, FD_PORT, FD_USER, FD_KEY, FD_JUMP, FD_SHARE, FD_AGENT, FD_DEVICE, FD_BAUD,
     FD_BAUD_CUSTOM, FD_DATA, FD_PARITY, FD_STOP, FD_FLOW, FD_COMMAND, FD_DIR, FD_COLOR, FD_ANTI_IDLE,
-    FD_HIGHLIGHT, FD_TARGET, FD_SAVE,
+    FD_HIGHLIGHT, FD_TARGET, FD_SAVE, FD_VENDOR,
 };
 
 static const char *const type_choices[] = { "SSH", "Telnet", "Serial console", "Local shell" };
@@ -58,6 +59,54 @@ static te_tag_color color_from_choice(size_t i)
 static size_t choice_from_color(te_tag_color c)
 {
     return c == TE_TAG_INHERIT || (unsigned)c >= TE_TAG_INHERIT ? 0 : (size_t)c + 1;
+}
+
+#define SB_LIVE_UP   0x22C55Eu   /* status dot: connected */
+#define SB_LIVE_DOWN 0xEF4444u   /* status dot: dropped or failed */
+
+/* Vendor / OS logo: choice 0 inherits from the folder, choice i + 1 is logo i. */
+static const char *vendor_choices[1 + 96];
+static size_t nvendor_choices;
+
+static_assert(TE_SESS_VENDOR_MAX == TE_LOGO_SLUG_MAX);
+
+static void init_vendor_choices(void)
+{
+    if (nvendor_choices > 0) {
+        return;
+    }
+    const char *const *names = logo_names();
+    vendor_choices[0] = "Inherit from folder";
+    size_t n = TE_MIN(logo_count(), TE_ARRAY_LEN(vendor_choices) - 1);
+    for (size_t i = 0; i < n; i++) {
+        vendor_choices[i + 1] = names[i];
+    }
+    nvendor_choices = n + 1;
+}
+
+static void add_vendor_field(te_form *f, const char *slug)
+{
+    init_vendor_choices();
+    te_form_field *fl = form_add(f, FD_VENDOR, TE_FIELD_CHOICE, "Vendor / OS", nullptr);
+    int li = logo_find(slug);
+    form_set_choices(fl, vendor_choices, nvendor_choices, li >= 0 && (size_t)li + 1 < nvendor_choices ? (size_t)li + 1 : 0);
+    if (fl != nullptr) {
+        fl->icons = true;
+        fl->icon_skip = 1;
+    }
+}
+
+/* The slug for the chosen logo. A slug this version does not know (written by a
+ * newer one) shows as "inherit" and is kept unless another logo is picked. */
+static void vendor_from_form(const te_form *f, const char *orig, char *out, size_t outsz)
+{
+    size_t c = form_choice(f, FD_VENDOR);
+    if (c == 0) {
+        bool keep = orig != nullptr && orig[0] != '\0' && logo_find(orig) < 0;
+        (void)str_copy(out, outsz, keep ? orig : "");
+        return;
+    }
+    (void)str_copy(out, outsz, logo_slug((int)(c - 1)));
 }
 
 static void init_baud_choices(void)
@@ -424,6 +473,25 @@ void sidebar_reload(te_sidebar *sb)
     }
 }
 
+void sidebar_live_begin(te_sidebar *sb)
+{
+    for (size_t i = 0; i < sb->store.len; i++) {
+        sb->store.nodes[i].live = TE_LIVE_CLOSED;
+    }
+}
+
+void sidebar_live_mark(te_sidebar *sb, const char *folder, const char *name, te_live_state state)
+{
+    int i = store_find_session(&sb->store, folder, name);
+    if (i < 0 || (size_t)i >= sb->store.len) {
+        return;
+    }
+    te_store_node *n = &sb->store.nodes[i];
+    if (n->live != TE_LIVE_DOWN) {   /* one dropped pane outweighs others of the same session */
+        n->live = (uint8_t)state;
+    }
+}
+
 void sidebar_toggle(te_sidebar *sb)
 {
     sb->visible = !sb->visible;
@@ -583,6 +651,7 @@ static void open_session_form(te_sidebar *sb, int purpose, const te_session *s, 
     if (fl != nullptr) (void)str_copy(fl->placeholder, sizeof fl->placeholder, "optional, e.g. ~/projects");
     form_set_choices(form_add(f, FD_COLOR, TE_FIELD_CHOICE, "Tab colour", nullptr), color_choices,
                      TE_ARRAY_LEN(color_choices), choice_from_color(s->color));
+    add_vendor_field(f, s->vendor);
     num[0] = '\0';
     if (s->anti_idle != TE_ANTI_IDLE_INHERIT) (void)str_fmt(num, sizeof num, "%d", (int)s->anti_idle);
     fl = form_add(f, FD_ANTI_IDLE, TE_FIELD_NUMBER, "Anti-idle (s)", num);
@@ -649,6 +718,7 @@ static bool session_from_form(te_sidebar *sb, te_session *s)
     (void)str_copy(s->command, sizeof s->command, form_value(f, FD_COMMAND));
     (void)str_copy(s->directory, sizeof s->directory, form_value(f, FD_DIR));
     s->color = color_from_choice(form_choice(f, FD_COLOR));
+    vendor_from_form(f, sb->form_session.vendor, s->vendor, sizeof s->vendor);
     const char *ai = form_value(f, FD_ANTI_IDLE);
     s->anti_idle = TE_ANTI_IDLE_INHERIT;
     if (ai[0] != '\0') {
@@ -806,6 +876,7 @@ static void run_menu(te_sidebar *sb, int id)
                            "Sessions in this folder use these unless they set their own.");
             form_set_choices(form_add(&sb->form, FD_COLOR, TE_FIELD_CHOICE, "Tab colour", nullptr), color_choices,
                              TE_ARRAY_LEN(color_choices), choice_from_color(n->fdef.color));
+            add_vendor_field(&sb->form, n->fdef.vendor);
             if (n->fdef.anti_idle != TE_ANTI_IDLE_INHERIT) (void)str_fmt(num, sizeof num, "%d", (int)n->fdef.anti_idle);
             te_form_field *fl = form_add(&sb->form, FD_ANTI_IDLE, TE_FIELD_NUMBER, "Anti-idle (s)", num);
             if (fl != nullptr) {
@@ -1037,6 +1108,8 @@ static void submit_form(te_sidebar *sb)
         te_folder_defaults d = { 0 };
         folder_defaults_init(&d);
         d.color = color_from_choice(form_choice(f, FD_COLOR));
+        int fnode = store_find_folder(&sb->store, sb->form_folder);
+        vendor_from_form(f, fnode >= 0 ? sb->store.nodes[fnode].fdef.vendor : "", d.vendor, sizeof d.vendor);
         const char *ai = form_value(f, FD_ANTI_IDLE);
         long v = 0;
         if (ai[0] != '\0') {
@@ -1696,13 +1769,28 @@ static void draw_sessions(const te_sidebar *sb, const te_painter *p, const te_ui
             } else {
                 eff.color = TE_TAG_NONE;
             }
-            uint32_t dot = tag_color_rgb(eff.color);
-            ui_text(p, TE_LAYER_BASE, x, tyy, dot != 0 ? "\xe2\x97\x8f" : "\xe2\x97\x8b", 1, dot != 0 ? dot : c->muted,
-                    false);   /* ● ○ */
+            uint32_t tagrgb = tag_color_rgb(eff.color);
+            if (tagrgb != 0) {
+                ui_rect(p, TE_LAYER_BASE, x - p->cell_w * 0.6f, ry + rh * 0.2f, 3.0f * s, rh * 0.6f, tagrgb, 1.0f);
+            }
+            /* Vendor / OS logo, with the connection state on a dot at its corner. */
+            int li = logo_find(eff.vendor);
+            float lsz = TE_MIN(rh * 0.8f, p->cell_w * 2.5f);
+            float ly = ry + (rh - lsz) / 2.0f;
+            ui_icon(p, TE_LAYER_BASE, x, ly, lsz, li >= 0 ? li : TE_LOGO_DEFAULT, fg);
+            uint32_t row_bg = selected ? (sb->focused ? c->sel_bg : c->hover)
+                                       : (idx == sb->hover ? ui_mix(c->bg, c->hover, 0.6f) : c->bg);
+            uint32_t state = n->live == TE_LIVE_UP ? SB_LIVE_UP : (n->live == TE_LIVE_DOWN ? SB_LIVE_DOWN : c->muted);
+            float d = lsz * 0.38f;
+            float ring = d + 3.0f * s;
+            float dx = x + lsz - d * 0.6f;
+            float dy = ly + lsz - d * 0.6f;
+            ui_icon(p, TE_LAYER_BASE, dx - (ring - d) / 2.0f, dy - (ring - d) / 2.0f, ring, logo_dot(), row_bg);
+            ui_icon(p, TE_LAYER_BASE, dx, dy, d, logo_dot(), state);
             const char *tag = n->sess != nullptr ? type_tag(n->sess->type) : "";
             size_t tagc = ui_text_cols(tag);
-            size_t name_room = room > tagc + 4 ? room - tagc - 4 : 1;
-            ui_text(p, TE_LAYER_BASE, x + p->cell_w * 2.0f, tyy, n->name, name_room, fg, false);
+            size_t name_room = room > tagc + 5 ? room - tagc - 5 : 1;
+            ui_text(p, TE_LAYER_BASE, x + p->cell_w * 3.0f, tyy, n->name, name_room, fg, false);
             ui_text(p, TE_LAYER_BASE, sb->x + sb->w - (float)(tagc + 1) * p->cell_w, tyy, tag, tagc,
                     selected && sb->focused ? c->sel_fg : c->muted, false);
         }

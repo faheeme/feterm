@@ -117,6 +117,10 @@ void sidebar_blur(te_sidebar *sb);
 void sidebar_quick_connect(te_sidebar *sb);
 /* Re-read the session folder (e.g. on config reload). */
 void sidebar_reload(te_sidebar *sb);
+/* Connection state of saved sessions for the status dots: reset every session
+ * to closed, then mark the ones open in panes (before each sidebar_draw). */
+void sidebar_live_begin(te_sidebar *sb);
+void sidebar_live_mark(te_sidebar *sb, const char *folder, const char *name, te_live_state state);
 
 void sidebar_draw(const te_sidebar *sb, const te_painter *p, const te_ui_colors *c);
 

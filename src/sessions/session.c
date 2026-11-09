@@ -212,6 +212,24 @@ bool session_user_valid(const char *user)
     return true;
 }
 
+bool session_vendor_valid(const char *v)
+{
+    if (v == nullptr) {
+        return false;
+    }
+    size_t n = strnlen(v, TE_SESS_VENDOR_MAX + 1);
+    if (n > TE_SESS_VENDOR_MAX) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        char c = v[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool session_value_safe(const char *v)
 {
     return v != nullptr && v[0] != '-' && printable_utf8(v);
@@ -288,6 +306,10 @@ bool session_validate(const te_session *s, const char **why)
     }
     if ((unsigned)s->color >= TE_TAG_COUNT) {
         *w = "Unknown colour";
+        return false;
+    }
+    if (!session_vendor_valid(s->vendor)) {
+        *w = "Vendor is not valid";
         return false;
     }
     if (s->anti_idle != TE_ANTI_IDLE_INHERIT && (s->anti_idle < 0 || s->anti_idle > TE_ANTI_IDLE_MAX)) {
@@ -428,6 +450,14 @@ static te_err set_text(char *dst, size_t dstsz, const char *value)
     return str_copy(dst, dstsz, value) == TE_OK ? TE_OK : TE_ERR_PARSE;
 }
 
+static te_err set_vendor(char *dst, size_t dstsz, const char *value)
+{
+    if (!session_vendor_valid(value)) {
+        return TE_ERR_PARSE;
+    }
+    return str_copy(dst, dstsz, value) == TE_OK ? TE_OK : TE_ERR_PARSE;
+}
+
 static te_err parse_anti_idle(const char *value, int32_t *out)
 {
     if (str_eq_ci(value, "inherit")) {
@@ -470,6 +500,7 @@ te_err session_parse_kv(te_session *s, const char *section, const char *key, con
         if (strcmp(key, "color") == 0) return tag_color_parse(value, &s->color) ? TE_OK : TE_ERR_PARSE;
         if (strcmp(key, "anti_idle") == 0) return parse_anti_idle(value, &s->anti_idle);
         if (strcmp(key, "highlight") == 0) return set_text(s->highlight, sizeof s->highlight, value);
+        if (strcmp(key, "vendor") == 0) return set_vendor(s->vendor, sizeof s->vendor, value);
     } else if (strcmp(section, "serial") == 0) {
         if (strcmp(key, "device") == 0) return set_text(s->serial.device, sizeof s->serial.device, value);
         if (strcmp(key, "line") == 0) return serial_parse(value, &s->serial) ? TE_OK : TE_ERR_PARSE;
@@ -490,6 +521,7 @@ te_err folder_parse_kv(te_folder_defaults *d, const char *section, const char *k
     if (strcmp(key, "user") == 0) {
         return session_user_valid(value) && str_copy(d->user, sizeof d->user, value) == TE_OK ? TE_OK : TE_ERR_PARSE;
     }
+    if (strcmp(key, "vendor") == 0) return set_vendor(d->vendor, sizeof d->vendor, value);
     return TE_OK;
 }
 
@@ -541,6 +573,7 @@ te_err session_serialize(const te_session *s, char *out, size_t outsz)
         rc = put(out, outsz, "anti_idle", num);
     }
     if (rc == TE_OK) rc = put(out, outsz, "highlight", s->highlight);
+    if (rc == TE_OK) rc = put(out, outsz, "vendor", s->vendor);
     if (rc == TE_OK && s->type == TE_SESS_SERIAL) {
         char line[64] = { 0 };
         rc = str_append(out, outsz, "\n[serial]\n");
@@ -570,5 +603,6 @@ te_err folder_serialize(const te_folder_defaults *d, char *out, size_t outsz)
         rc = put(out, outsz, "anti_idle", num);
     }
     if (rc == TE_OK) rc = put(out, outsz, "user", d->user);
+    if (rc == TE_OK) rc = put(out, outsz, "vendor", d->vendor);
     return rc;
 }

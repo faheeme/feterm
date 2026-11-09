@@ -232,6 +232,30 @@ static te_form_result cycle_choice(te_form_field *fl, int dir)
     return TE_FORM_CHANGED;
 }
 
+static char ascii_lower(char c)
+{
+    return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c;
+}
+
+/* Typing a letter or digit on a choice moves to the next choice starting with it. */
+static te_form_result jump_choice(te_form_field *fl, const char *utf8)
+{
+    if (fl->nchoices == 0 || fl->choices == nullptr || utf8[0] == '\0' || utf8[1] != '\0' ||
+        (unsigned char)utf8[0] >= 0x80) {
+        return TE_FORM_NONE;
+    }
+    char want = ascii_lower(utf8[0]);
+    for (size_t k = 1; k <= fl->nchoices; k++) {
+        size_t i = (fl->choice + k) % fl->nchoices;
+        const char *c = fl->choices[i];
+        if (c != nullptr && ascii_lower(c[0]) == want) {
+            fl->choice = i;
+            return TE_FORM_CHANGED;
+        }
+    }
+    return TE_FORM_NONE;
+}
+
 te_form_result form_key(te_form *f, te_key key, uint32_t mods)
 {
     if (!f->open) {
@@ -312,7 +336,10 @@ te_form_result form_text(te_form *f, const char *utf8)
         return TE_FORM_NONE;
     }
     if (fl->kind == TE_FIELD_CHOICE || fl->kind == TE_FIELD_CHECK) {
-        return strcmp(utf8, " ") == 0 ? cycle_choice(fl, 1) : TE_FORM_NONE;
+        if (strcmp(utf8, " ") == 0) {
+            return cycle_choice(fl, 1);
+        }
+        return fl->kind == TE_FIELD_CHOICE ? jump_choice(fl, utf8) : TE_FORM_NONE;
     }
     return field_insert(fl, utf8) ? TE_FORM_CHANGED : TE_FORM_NONE;
 }
@@ -552,7 +579,16 @@ void form_draw(const te_form *f, const te_painter *p, const te_ui_colors *c)
         case TE_FIELD_CHOICE: {
             const char *v = fl->nchoices > 0 && fl->choices != nullptr ? fl->choices[fl->choice] : "";
             ui_text(p, TE_LAYER_OVERLAY, tx, ty, "\xe2\x97\x82", 1, foc ? c->accent : c->muted, false);   /* ◂ */
-            ui_text(p, TE_LAYER_OVERLAY, tx + p->cell_w * 2.0f, ty, v, fcols > 4 ? fcols - 4 : 1, c->fg, false);
+            float vx = tx + p->cell_w * 2.0f;
+            size_t vcols = fcols > 4 ? fcols - 4 : 1;
+            if (fl->icons && fl->choice >= fl->icon_skip && vcols > 4) {
+                float sz = p->cell_h * 0.9f;
+                ui_icon(p, TE_LAYER_OVERLAY, vx, ty + (p->cell_h - sz) / 2.0f, sz, (int)(fl->choice - fl->icon_skip),
+                        c->fg);
+                vx += p->cell_w * 3.0f;
+                vcols -= 3;
+            }
+            ui_text(p, TE_LAYER_OVERLAY, vx, ty, v, vcols, c->fg, false);
             ui_text(p, TE_LAYER_OVERLAY, fx + fw - p->cell_w * 1.5f, ty, "\xe2\x96\xb8", 1, foc ? c->accent : c->muted, false); /* ▸ */
             break;
         }

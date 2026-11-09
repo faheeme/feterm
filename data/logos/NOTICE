@@ -1,0 +1,37 @@
+Vendor / OS logos (src/ui/logo_data.h)
+======================================
+
+The brand marks are taken from Simple Icons 16.37.0 (https://simpleicons.org,
+npm package "simple-icons"), rasterized to 48x48 alpha masks and drawn in a
+single neutral colour (they are never recoloured to signal state: the status
+dot is drawn separately). Simple Icons is released under CC0 1.0; icons
+that carry their own licence are listed below.
+
+All logos are trademarks or registered trademarks of their respective
+owners. FeTerm is not affiliated with or endorsed by any of them; a logo is
+shown only to identify the platform a saved session connects to.
+
+Icons with their own licence (attribution):
+
+  Debian        CC BY-SA 3.0   Software in the Public Interest, Inc.
+                https://www.debian.org/logos/
+  Gentoo        CC BY-SA 2.5   Gentoo Foundation, Inc.
+                https://www.gentoo.org/inside-gentoo/artwork/gentoo-logo.html
+  NixOS         CC BY 4.0      NixOS Foundation / the NixOS artwork project
+                https://github.com/NixOS/nixos-artwork
+  Rocky Linux   CC BY-SA 4.0   Rocky Enterprise Software Foundation
+                https://rockylinux.org/
+  Fedora        Fedora logo usage guidelines
+                https://docs.fedoraproject.org/en-US/project/brand/
+
+Simple Icons slugs used: almalinux alpinelinux archlinux centos cisco debian
+dell fedora fortinet freebsd gentoo huawei junipernetworks kalilinux linux
+linuxmint apple mikrotik nixos nokia openbsd opensuse opnsense
+paloaltonetworks pfsense proxmox raspberrypi redhat rockylinux ubiquiti
+ubuntu vmware
+
+Drawn for FeTerm (no third-party artwork; MIT like the rest of FeTerm):
+the generic terminal, server and network icons, the status dot, and the
+letter badges for Arista ("Ar"), Check Point ("CP"), HPE / Aruba ("HP"),
+VyOS ("Vy") and Windows ("W"). The badge letters are outlines of DejaVu
+Sans Bold (Bitstream Vera licence, permits this use).
