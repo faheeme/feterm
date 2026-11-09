@@ -1517,6 +1517,9 @@ static void on_key(app *a, const te_event *ev)
         return;
     }
     a->suppress_text = false;
+    if (ev->key.key == TE_KEY_NONE) {
+        return;   /* a key FeTerm doesn't map: only its text event (if any) counts */
+    }
     uint32_t kmods = ev->key.mods & (TE_MOD_SHIFT | TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER);
     /* Printable keys without Ctrl/Alt arrive again as text; only those may produce text. */
     bool printable = ev->key.key == TE_KEY_CHAR && (kmods & (TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER)) == 0;
@@ -1842,6 +1845,17 @@ static te_chrome make_chrome(app *a)
     };
 }
 
+/* The button that pastes the selection ([mouse] mouse_paste). */
+static bool is_paste_button(const app *a, int b)
+{
+    switch (a->cfg.mouse_paste) {
+    case TE_MOUSE_PASTE_MIDDLE: return b == TE_MB_MIDDLE;
+    case TE_MOUSE_PASTE_RIGHT:  return b == TE_MB_RIGHT;
+    case TE_MOUSE_PASTE_NONE:
+    default:                    return false;
+    }
+}
+
 static void on_button(app *a, const te_event *ev)
 {
     int b = map_button(ev->button.button);
@@ -1953,7 +1967,7 @@ static void on_button(app *a, const te_event *ev)
     uint16_t row = 0;
     bool inside = pixel_to_cell(a, p, ev->button.x, ev->button.y, &col, &row);
 
-    if (b == TE_MB_MIDDLE) {
+    if (is_paste_button(a, b)) {
         if (ev->button.down && inside) {
             paste_text(a, plat_primary_get(a->plat));
         }

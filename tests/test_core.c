@@ -480,6 +480,28 @@ static void test_config_transparency(void)
     unlink(off);
 }
 
+static void test_config_mouse_paste(void)
+{
+    te_config c;
+    config_defaults(&c);
+    CHECK(c.mouse_paste == TE_MOUSE_PASTE_MIDDLE);
+    static const struct { const char *text; te_mouse_paste want; } cases[] = {
+        { "[mouse]\nmouse_paste = right\n", TE_MOUSE_PASTE_RIGHT },
+        { "[mouse]\nmouse_paste = none\n", TE_MOUSE_PASTE_NONE },
+        { "[mouse]\nmouse_paste = middle\n", TE_MOUSE_PASTE_MIDDLE },
+        { "[mouse]\nmouse_paste = left\n", TE_MOUSE_PASTE_MIDDLE },   /* invalid: default kept */
+    };
+    for (size_t i = 0; i < TE_ARRAY_LEN(cases); i++) {
+        config_defaults(&c);
+        char path[512];
+        (void)tmp_template(path, sizeof path, "te-cfg");
+        CHECK(write_tmp(path, cases[i].text));
+        CHECK(config_load(&c, path) == TE_OK);
+        CHECK(c.mouse_paste == cases[i].want);
+        unlink(path);
+    }
+}
+
 /* ------------------------------------------------------------------------- */
 /* Highlighting */
 
@@ -1593,6 +1615,7 @@ int main(void)
     test_keys();
     test_ini();
     test_config_transparency();
+    test_config_mouse_paste();
     test_highlight();
 #ifdef _WIN32
     test_dir_case();
