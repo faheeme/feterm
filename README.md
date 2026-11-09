@@ -120,12 +120,12 @@ Differences from Linux:
 
 ### macOS
 
-macOS 14 Sonoma or newer on Apple Silicon (every M1, M2, M3, M4 and M5 Mac), or macOS 15
-Sequoia or newer on Intel.
+macOS 15 Sequoia or newer, on Apple Silicon (every M1, M2, M3, M4 and M5 Mac) or Intel. On
+macOS 14 Sonoma, install with Homebrew, which builds FeTerm from source there.
 
 **With Homebrew** (no Gatekeeper prompt, updates with `brew upgrade`; prebuilt for Apple
-Silicon on macOS 15 and 26, while on macOS 14 and Intel Macs Homebrew builds from source, so
-the disk image below is quicker there):
+Silicon on macOS 15 and 26; on Intel Macs and macOS 14 Homebrew builds from source, so on
+Intel the disk image below is quicker):
 
 ```
 brew install faheeme/tap/feterm
@@ -141,8 +141,7 @@ Open the image and drag **FeTerm** to Applications.
 
 The disk image is not signed with an Apple Developer ID yet, so macOS blocks the first launch.
 On macOS 15 and newer: open FeTerm once, dismiss the warning, then go to **System
-Settings → Privacy & Security** and choose **Open Anyway** (on macOS 14, right-click the
-app and choose **Open**). Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/FeTerm.app`.
+Settings → Privacy & Security** and choose **Open Anyway**. Or, in Terminal: `xattr -dr com.apple.quarantine /Applications/FeTerm.app`.
 
 Differences from Linux:
 - **Shortcuts use Cmd**, like Terminal.app and iTerm2 (see the table below).

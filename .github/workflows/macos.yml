@@ -23,7 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14        # Apple Silicon; bundle runs on macOS 14 and newer
+          - runner: macos-15        # Apple Silicon; bundle runs on macOS 15 and newer (macos-14 is retired)
             arch: arm64
           - runner: macos-15-intel  # Intel; bundle runs on macOS 15 and newer
             arch: x86_64
