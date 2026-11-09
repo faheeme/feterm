@@ -27,6 +27,8 @@ Juniper output.
 
 %install
 %make_install PREFIX=%{_prefix}
+# Check FeTerm's COPR repo hourly, so "dnf upgrade" sees new releases without --refresh.
+install -Dpm 0644 packaging/rpm/50-feterm.repo %{buildroot}%{_sysconfdir}/dnf/repos.override.d/50-feterm.repo
 
 %check
 make PREFIX=%{_prefix} WERROR= test
@@ -40,6 +42,8 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.gitlab.faheeme.%{n
 %{_datadir}/%{name}/
 %{_datadir}/applications/io.gitlab.faheeme.%{name}.desktop
 %{_datadir}/icons/hicolor/*/apps/io.gitlab.faheeme.%{name}*
+%dir %{_sysconfdir}/dnf/repos.override.d
+%config(noreplace) %{_sysconfdir}/dnf/repos.override.d/50-feterm.repo
 
 %changelog
 * Mon Nov 09 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.5-1

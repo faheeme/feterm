@@ -1,0 +1,6 @@
+# Installed by the feterm package. dnf normally checks a repository for new
+# packages only every day or two, so "dnf upgrade" missed fresh FeTerm releases
+# without --refresh. This checks FeTerm's COPR repository at most hourly.
+# dnf5 (Fedora 41 and newer) reads this folder; dnf4 ignores it.
+[copr:copr.fedorainfracloud.org:faheeme:feterm]
+metadata_expire=1h
