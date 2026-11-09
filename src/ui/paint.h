@@ -20,6 +20,9 @@ typedef struct te_painter {
     /* One line of UTF-8 text with its top-left at (x, y); at most max_cols cells. */
     void (*text)(void *user, te_layer layer, float x, float y, const char *utf8, size_t max_cols, uint32_t rgb,
                  bool bold);
+    /* A logo (ui/logo.h index, or logo_dot()) size x size pixels, top-left at (x, y), in one colour.
+     * May be nullptr: icons are then left out. */
+    void (*icon)(void *user, te_layer layer, float x, float y, float size, int logo, uint32_t rgb);
 } te_painter;
 
 /* Colours the UI draws with, derived from the terminal theme. */
@@ -45,6 +48,7 @@ uint32_t ui_mix(uint32_t a, uint32_t b, float t);
 void ui_rect(const te_painter *p, te_layer layer, float x, float y, float w, float h, uint32_t rgb, float alpha);
 void ui_text(const te_painter *p, te_layer layer, float x, float y, const char *utf8, size_t max_cols, uint32_t rgb,
              bool bold);
+void ui_icon(const te_painter *p, te_layer layer, float x, float y, float size, int logo, uint32_t rgb);
 /* A one-pixel (times scale) outline. */
 void ui_frame(const te_painter *p, te_layer layer, float x, float y, float w, float h, uint32_t rgb);
 

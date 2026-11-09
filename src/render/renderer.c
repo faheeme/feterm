@@ -5,6 +5,7 @@
 
 #include "render/boxdraw.h"
 #include "render/gl.h"
+#include "ui/logo.h"
 #include "ui/scrollbar.h"
 #include "util/log.h"
 #include "util/mem.h"
@@ -1405,6 +1406,74 @@ static void ui_text_cb(void *user, te_layer layer, float x, float y, const char 
     }
 }
 
+/* A logo as an alpha glyph in the atlas, cached per index and pixel size
+ * (bit 25 keeps these keys apart from font glyphs). */
+static const glyph *get_logo(te_renderer *r, int logo, int px)
+{
+    px = TE_CLAMP(px, 1, logo_max_px());
+    if (logo < 0 || logo > 255) {
+        return nullptr;
+    }
+    uint32_t key = (1u << 25) | ((uint32_t)logo << 8) | (uint32_t)px;
+    if ((r->cache_len + 1u) * 2u > r->cache_cap && !cache_grow(r)) {
+        if (r->cache_len + 1u >= r->cache_cap) {
+            r->atlas_full = true;
+            return nullptr;
+        }
+    }
+    cache_entry *e = cache_find(r, key);
+    if (e == nullptr) {
+        return nullptr;
+    }
+    if (e->used) {
+        return &e->g;
+    }
+    if (r->atlas_full) {
+        return nullptr;
+    }
+    uint8_t mask[TE_LOGO_PX_MAX * TE_LOGO_PX_MAX];
+    uint8_t rgba[TE_LOGO_PX_MAX * TE_LOGO_PX_MAX * 4];
+    glyph g = { 0 };
+    int n = logo_render(logo, px, mask, sizeof mask);
+    if (n > 0) {
+        int ax = 0;
+        int ay = 0;
+        if (!atlas_alloc(r, n, n, &ax, &ay)) {
+            return nullptr;
+        }
+        for (size_t i = 0; i < (size_t)n * (size_t)n; i++) {
+            rgba[i * 4 + 0] = 255;
+            rgba[i * 4 + 1] = 255;
+            rgba[i * 4 + 2] = 255;
+            rgba[i * 4 + 3] = mask[i];
+        }
+        glBindTexture(GL_TEXTURE_2D, r->atlas);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, ax, ay, n, n, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
+        g.x = (uint16_t)ax;
+        g.y = (uint16_t)ay;
+        g.w = (uint16_t)n;
+        g.h = (uint16_t)n;
+        g.present = true;
+    }
+    e->key = key;
+    e->used = true;
+    e->g = g;
+    r->cache_len++;
+    return &e->g;
+}
+
+static void ui_icon_cb(void *user, te_layer layer, float x, float y, float size, int logo, uint32_t rgb)
+{
+    te_renderer *r = user;
+    int px = (int)(size + 0.5f);
+    const glyph *g = get_logo(r, logo, px);
+    if (g != nullptr && g->present) {
+        /* Centre a clamped (smaller) logo in the requested box. */
+        float off = (size - (float)g->w) / 2.0f;
+        push_glyph(layer == TE_LAYER_OVERLAY ? &r->ov_glyphs : &r->glyphs, g, x + off, y + off, rgb, 1.0f);
+    }
+}
+
 void renderer_painter(te_renderer *r, float scale, te_painter *out)
 {
     const te_font_metrics *m = font_metrics(ui_font(r));
@@ -1415,6 +1484,7 @@ void renderer_painter(te_renderer *r, float scale, te_painter *out)
         .scale = scale > 0.0f ? scale : 1.0f,
         .rect = ui_rect_cb,
         .text = ui_text_cb,
+        .icon = ui_icon_cb,
     };
 }
 
