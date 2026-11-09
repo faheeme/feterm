@@ -1,5 +1,5 @@
 Name:           feterm
-Version:        0.5.4
+Version:        0.5.5
 Release:        1%{?dist}
 Summary:        Modern terminal emulator with network-device syntax highlighting
 License:        MIT
@@ -42,6 +42,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.gitlab.faheeme.%{n
 %{_datadir}/icons/hicolor/*/apps/io.gitlab.faheeme.%{name}*
 
 %changelog
+* Mon Nov 09 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.5-1
+- Vendor / OS logos with connection status on saved sessions; mouse_paste
+  option; numpad first-press fix; Windows selections reach the clipboard
+
 * Wed Nov 04 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.4-1
 - Clone sessions into a new tab or split; Absinthe theme
 
