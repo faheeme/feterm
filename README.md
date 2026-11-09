@@ -37,8 +37,15 @@ sudo dnf copr enable faheeme/feterm
 sudo dnf install feterm
 ```
 
-Updates arrive with `sudo dnf upgrade`. dnf checks the repo for new versions every day or
-two; `sudo dnf upgrade --refresh` checks straight away. To remove FeTerm and the repo:
+Updates arrive with `sudo dnf upgrade`. On Fedora, the package tells dnf to check FeTerm's
+repo for new versions every hour, so `--refresh` isn't needed. Rocky, AlmaLinux and RHEL 10
+use the older dnf, which checks every day or two; to make it hourly there too, run once:
+
+```sh
+sudo dnf config-manager --save --setopt='copr:copr.fedorainfracloud.org:faheeme:feterm.metadata_expire=1h'
+```
+
+To remove FeTerm and the repo:
 
 ```sh
 sudo dnf remove feterm
