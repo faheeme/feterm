@@ -139,6 +139,25 @@ static te_key map_key(SDL_Keycode k, uint32_t *cp)
     case SDLK_F11: return TE_KEY_F11;
     case SDLK_F12: return TE_KEY_F12;
     case SDLK_PAUSE: return TE_KEY_PAUSE;
+    /* Keypad with NumLock on (with it off SDL reports Home, End, arrows...):
+     * the same characters as the main keys. */
+    case SDLK_KP_0:        *cp = '0'; return TE_KEY_CHAR;
+    case SDLK_KP_1:        *cp = '1'; return TE_KEY_CHAR;
+    case SDLK_KP_2:        *cp = '2'; return TE_KEY_CHAR;
+    case SDLK_KP_3:        *cp = '3'; return TE_KEY_CHAR;
+    case SDLK_KP_4:        *cp = '4'; return TE_KEY_CHAR;
+    case SDLK_KP_5:        *cp = '5'; return TE_KEY_CHAR;
+    case SDLK_KP_6:        *cp = '6'; return TE_KEY_CHAR;
+    case SDLK_KP_7:        *cp = '7'; return TE_KEY_CHAR;
+    case SDLK_KP_8:        *cp = '8'; return TE_KEY_CHAR;
+    case SDLK_KP_9:        *cp = '9'; return TE_KEY_CHAR;
+    case SDLK_KP_PERIOD:   *cp = '.'; return TE_KEY_CHAR;
+    case SDLK_KP_COMMA:    *cp = ','; return TE_KEY_CHAR;
+    case SDLK_KP_DIVIDE:   *cp = '/'; return TE_KEY_CHAR;
+    case SDLK_KP_MULTIPLY: *cp = '*'; return TE_KEY_CHAR;
+    case SDLK_KP_MINUS:    *cp = '-'; return TE_KEY_CHAR;
+    case SDLK_KP_PLUS:     *cp = '+'; return TE_KEY_CHAR;
+    case SDLK_KP_EQUALS:   *cp = '='; return TE_KEY_CHAR;
     default:
         break;
     }
@@ -446,7 +465,9 @@ static bool translate(te_platform *p, const SDL_Event *e, te_event *ev)
 #endif
         ev->key.down = e->key.down;
         ev->key.repeat = e->key.repeat;
-        return ev->key.key != TE_KEY_NONE;
+        /* Unmapped presses still go through: they end the previous key's
+         * claim on the next text event (see suppress_text in main.c). */
+        return ev->key.key != TE_KEY_NONE || e->key.down;
     case SDL_EVENT_TEXT_INPUT:
         if (e->text.text == nullptr) {
             return false;
@@ -712,6 +733,13 @@ void plat_primary_set(te_platform *p, const char *utf8)
     if (utf8 != nullptr) {
         (void)SDL_SetPrimarySelectionText(utf8);
 #ifdef _WIN32
+        /* Windows has no primary selection, so other programs could never see
+         * a selection: put it on the clipboard too (as Windows Terminal does).
+         * The serial is read after the write, so the paste below keeps using
+         * the selection until another program copies something. */
+        if (!SDL_SetClipboardText(utf8)) {
+            LOG_W("clipboard: %s", SDL_GetError());
+        }
         if (p != nullptr) {
             p->primary_clip = os_clipboard_serial();
         }
@@ -725,10 +753,11 @@ void plat_primary_set(te_platform *p, const char *utf8)
 char *plat_primary_get(te_platform *p)
 {
 #ifdef _WIN32
-    /* Windows has no primary selection: SDL keeps one that only FeTerm writes,
-     * so text copied in another program would never reach middle-click. Paste
-     * whichever is newer: if the clipboard changed after the last selection
-     * here, it holds what the user copied most recently. */
+    /* Windows has no primary selection: SDL keeps one that only FeTerm writes
+     * (plat_primary_set also copies it to the clipboard), so text copied in
+     * another program would never reach middle-click. Paste whichever is newer:
+     * if the clipboard changed after the last selection here, it holds what the
+     * user copied most recently. */
     if (p != nullptr && os_clipboard_serial() != p->primary_clip) {
         char *clip = take_sdl_string(SDL_GetClipboardText());
         if (clip != nullptr) {

@@ -10,6 +10,7 @@ typedef enum { TE_BELL_NONE, TE_BELL_VISUAL, TE_BELL_URGENT } te_bell_mode;
 typedef enum { TE_TABBAR_AUTO, TE_TABBAR_ALWAYS, TE_TABBAR_NEVER } te_tabbar_mode;
 typedef enum { TE_NOTIFY_UNFOCUSED, TE_NOTIFY_ALWAYS, TE_NOTIFY_NEVER } te_notify_mode;
 typedef enum { TE_RECONNECT_ASK, TE_RECONNECT_AUTO, TE_RECONNECT_NEVER } te_reconnect_mode;
+typedef enum { TE_MOUSE_PASTE_MIDDLE, TE_MOUSE_PASTE_RIGHT, TE_MOUSE_PASTE_NONE } te_mouse_paste;
 
 /* [keyboard] macos_option_as_alt: which Option keys are Alt (Meta) instead of typing characters. */
 enum { TE_OPTION_LEFT = 1u << 0, TE_OPTION_RIGHT = 1u << 1 };
@@ -48,6 +49,7 @@ typedef struct te_config {
     bool            click_to_position;
     bool            click_emacs_keys; /* send Ctrl-B/Ctrl-F instead of arrow keys */
     bool            copy_on_select;   /* selecting text copies it to the PRIMARY selection */
+    te_mouse_paste  mouse_paste;      /* the mouse button that pastes the selection */
     char            word_chars[64];   /* besides letters/digits, characters that are part of a word */
     /* [sidebar] */
     bool            sidebar_right;

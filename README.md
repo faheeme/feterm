@@ -209,7 +209,7 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Shortcut (default) | Action |
 |---|---|
 | Ctrl+Shift+C / Ctrl+Shift+V | copy selection / paste clipboard |
-| Shift+Insert, middle click | paste the primary selection (on Windows: the last text selected in FeTerm or copied anywhere, whichever is newer) |
+| Shift+Insert, middle click | paste the primary selection (on Windows, selecting text also copies it to the clipboard, and this pastes whichever is newer). `[mouse] mouse_paste = middle \| right \| none` picks the button |
 | drag, double-click, triple-click | select text, a word (IPs, paths, URLs), a whole line |
 | Alt+drag | rectangular selection |
 | Shift+drag / Shift+click | select even when a program uses the mouse |

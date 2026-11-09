@@ -55,6 +55,7 @@ void config_defaults(te_config *c)
     c->click_to_position = true;
     c->click_emacs_keys = false;
     c->copy_on_select = true;
+    c->mouse_paste = TE_MOUSE_PASTE_MIDDLE;
     (void)str_copy(c->word_chars, sizeof c->word_chars, "-_./~:@%+=?&#*");
     keymap_defaults(&c->keys);
     c->confirm_paste = true;
@@ -193,6 +194,11 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
             if (strcmp(value, "arrows") == 0) c->click_emacs_keys = false;
             else if (strcmp(value, "emacs") == 0) c->click_emacs_keys = true;
             else BAD("click_keys (arrows|emacs)");
+        } else if (strcmp(key, "mouse_paste") == 0) {
+            if (strcmp(value, "middle") == 0) c->mouse_paste = TE_MOUSE_PASTE_MIDDLE;
+            else if (strcmp(value, "right") == 0) c->mouse_paste = TE_MOUSE_PASTE_RIGHT;
+            else if (strcmp(value, "none") == 0) c->mouse_paste = TE_MOUSE_PASTE_NONE;
+            else BAD("mouse_paste (middle|right|none)");
         } else if (strcmp(key, "copy_on_select") == 0) {
             if (str_to_bool(value, &b)) c->copy_on_select = b; else BAD("boolean");
         } else if (strcmp(key, "word_chars") == 0) {

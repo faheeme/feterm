@@ -101,8 +101,11 @@ alt_screen = false
 click_to_position = true
 ; arrows | emacs (Ctrl-B / Ctrl-F)
 click_keys = arrows
-; Selecting text copies it to the PRIMARY selection (middle-click pastes it)
+; Selecting text copies it to the PRIMARY selection (middle-click pastes it).
+; Windows has no PRIMARY selection, so there it also copies to the clipboard.
 copy_on_select = true
+; The mouse button that pastes the selection: middle | right | none
+mouse_paste = middle
 ; Characters that count as part of a word for double-click selection,
 ; besides letters and digits (so IPs, paths and URLs select in one go)
 word_chars = -_./~:@%+=?&#*
