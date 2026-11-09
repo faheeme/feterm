@@ -111,7 +111,8 @@ echo "== building $name"
 # Root inside the container (Wine's prefix in the image is root's); everything
 # written to the tree is handed back to the caller at the end. The installer's
 # version is the Makefile's plus the label, so a test install says what it is.
-docker run --rm -v "$top:/src:z" -w /src -e VERSION="$version" -e NAME="$name" \
+# The package name goes in as PKG: NAME would override the Makefile's NAME.
+docker run --rm -v "$top:/src:z" -w /src -e VERSION="$version" -e PKG="$name" \
     -e APPVER="$version${label:+-$label}" -e SUMS="$sums" -e OWNER="$(id -u):$(id -g)" "$image" bash -euo pipefail -c '
     cross=x86_64-w64-mingw32
     trap "chown -R \"\$OWNER\" build-windows dist feterm.exe feterm-helper.exe 2>/dev/null || true" EXIT
@@ -124,15 +125,15 @@ docker run --rm -v "$top:/src:z" -w /src -e VERSION="$version" -e NAME="$name" \
     stage=build-windows/stage/FeTerm
     packaging/windows/stage.sh "$stage"
     mkdir -p dist
-    rm -f "dist/$NAME.zip" "dist/$NAME-setup.exe"
-    (cd build-windows/stage && zip -qr "../../dist/$NAME.zip" FeTerm)
+    rm -f "dist/$PKG.zip" "dist/$PKG-setup.exe"
+    (cd build-windows/stage && zip -qr "../../dist/$PKG.zip" FeTerm)
     echo "== installer"
-    # The .iss names its output feterm-<AppVersion>-windows-x64-setup.exe, which is $NAME-setup.exe.
+    # The .iss names its output feterm-<AppVersion>-windows-x64-setup.exe, which is $PKG-setup.exe.
     (cd packaging/windows && wine "C:\\InnoSetup\\ISCC.exe" /Q "/DAppVersion=$APPVER" \
         "/DStageDir=Z:\\src\\build-windows\\stage\\FeTerm" "/OZ:\\src\\dist" feterm.iss)
-    [[ -f "dist/$NAME-setup.exe" ]] || { echo "build: the installer is not dist/$NAME-setup.exe" >&2; exit 1; }
+    [[ -f "dist/$PKG-setup.exe" ]] || { echo "build: the installer is not dist/$PKG-setup.exe" >&2; exit 1; }
     if [[ -n $SUMS ]]; then
-        (cd dist && sha256sum "$NAME.zip" "$NAME-setup.exe" > "$SUMS")
+        (cd dist && sha256sum "$PKG.zip" "$PKG-setup.exe" > "$SUMS")
     fi
 '
 echo "== done:"
