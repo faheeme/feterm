@@ -1,3 +1,11 @@
+feterm (0.5.5-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: saved sessions show a vendor or OS logo with a
+    connection-status dot; [mouse] mouse_paste picks the paste button;
+    fixes numpad keys that were ignored on the first press.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Mon, 09 Nov 2026 17:17:38 +0200
+
 feterm (0.5.4-1~ppa1) resolute; urgency=medium
 
   * New upstream release: the focused session can be cloned into a new
