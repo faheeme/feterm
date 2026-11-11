@@ -157,6 +157,9 @@ const te_line *term_grid_line(const te_term *t, uint16_t y);
 
 /* Current working directory reported by the shell (OSC 7), or "" if unknown. */
 const char *term_cwd(const te_term *t);
+/* Last folder reported by OSC 7 from any host (e.g. a remote shell over ssh),
+ * or "" if none. Never use it as a local path. */
+const char *term_shell_cwd(const te_term *t);
 
 /* Inline images (sixel / kitty graphics) currently stored. */
 size_t term_image_count(const te_term *t);
