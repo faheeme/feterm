@@ -58,8 +58,13 @@ reconnect = ask
 ; Where downloads go (folders are created on demand)
 download_dir = ~/Downloads
 ; The Files tab follows the folder of the remote shell. Needs the remote shell to report it
-; (OSC 7), e.g. in ~/.bashrc on the server:
-;   PROMPT_COMMAND='printf "\e]7;file://%s%s\e\\" "$HOSTNAME" "$PWD"'
+; (OSC 7). Add this to ~/.bashrc on the server (and locally, for prompt jumping, see below):
+;   # FeTerm shell integration: prompt marks (OSC 133) + current folder (OSC 7)
+;   if [[ $- == *i* ]]; then
+;       __feterm_cwd() { printf '\e]7;file://%s%s\e\\' "$HOSTNAME" "$PWD"; }
+;       PROMPT_COMMAND="__feterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+;       PS1='\[\e]133;A\e\\\]'"$PS1"'\[\e]133;B\e\\\]'
+;   fi
 follow_terminal = true
 ; Program for "Edit locally" (e.g. gedit, code, kate); empty uses your desktop's default
 editor =
@@ -133,7 +138,7 @@ scroll_bottom = shift+end
 search = ctrl+shift+f
 highlight_cycle = ctrl+shift+h
 reload_config = ctrl+shift+r
-; Jump between shell prompts (needs OSC 133 shell integration)
+; Jump between shell prompts (needs OSC 133 shell integration: the ~/.bashrc lines under [files])
 prev_prompt = ctrl+shift+z
 next_prompt = ctrl+shift+x
 ; Tabs and split panes

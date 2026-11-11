@@ -993,6 +993,7 @@ static void test_osc8_and_abs(void)
     CHECK(strcmp(term_cwd(t), "/tmp/here") == 0);
     feed(t, "\x1b]7;file://evil.example.com/tmp/pwned\x1b\\");
     CHECK(strcmp(term_cwd(t), "/tmp/here") == 0);
+    CHECK(strcmp(term_shell_cwd(t), "/tmp/pwned") == 0);   /* remote folder: Files panel only */
     feed(t, "\x1b]7;file://localhost/bad%01path\x1b\\");   /* percent-encoded control byte: rejected */
     CHECK(strcmp(term_cwd(t), "/tmp/here") == 0);
 

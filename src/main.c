@@ -1123,10 +1123,11 @@ static void update_files(app *a)
     }
     files_set_remote(&a->sb.files, r, ssh);
     /* Follow the remote shell's folder when it reports one (OSC 7). */
-    if (r != nullptr && a->cfg.follow_terminal && remote_state(r) == TE_RS_READY) {
+    if (r != nullptr && remote_state(r) == TE_RS_READY) {
         for (size_t i = 0; i < MAX_PANES; i++) {
             if (a->remotes[i].r == r) {
-                const char *cwd = term_cwd(p->term);
+                const char *cwd = term_shell_cwd(p->term);
+                files_note_cwd(&a->sb.files, cwd);
                 if (cwd != nullptr && cwd[0] == '/' && strcmp(cwd, a->remotes[i].last_cwd) != 0) {
                     (void)str_copy(a->remotes[i].last_cwd, sizeof a->remotes[i].last_cwd, cwd);
                     files_follow(&a->sb.files, cwd);
@@ -1148,6 +1149,7 @@ static void apply_files_config(app *a)
     }
     if (a->sb_ready) {
         files_set_download_dir(&a->sb.files, a->download_dir);
+        a->sb.files.follow = a->cfg.follow_terminal;   /* the toolbar toggle starts here */
     }
 }
 

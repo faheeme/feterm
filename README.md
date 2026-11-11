@@ -221,7 +221,7 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Shift+drag / Shift+click | select even when a program uses the mouse |
 | Ctrl+click (hover shows the link) | open a URL or OSC 8 hyperlink |
 | Ctrl+Shift+F | search the scrollback (regex; Enter older, Shift+Enter newer, Esc close) |
-| Ctrl+Shift+Z / X | jump to the previous / next shell prompt (OSC 133) |
+| Ctrl+Shift+Z / X | jump to the previous / next shell prompt (needs [shell integration](#shell-integration)) |
 | Ctrl+Shift+= / - / 0 | zoom in / out / reset |
 | Shift+PgUp / PgDn, Shift+Home / End | scroll through history |
 | Ctrl+Shift+Up / Down, mouse wheel | scroll by line |
@@ -356,8 +356,8 @@ The Files tab (Ctrl+Shift+2) browses the focused SSH session's server over SFTP.
 - **Edit locally:** downloads the file to a private folder, opens it in `[files] editor` (or
   your desktop's default), and uploads it again every time you save.
 - **Follow terminal folder** (the ⇵ button): the tab follows the folder of the remote shell.
-  The server's shell has to report it, which takes one line in `~/.bashrc` (see
-  `config.ini.example`).
+  The server's shell has to report it: add the [shell integration](#shell-integration)
+  lines to `~/.bashrc` on the server.
 - **No SFTP** (e.g. Cisco IOS): the tab offers Upload a file / Download a file using
   `scp -O`, the classic protocol those devices speak.
 
@@ -419,8 +419,35 @@ the Left/Right keys you would have pressed (or Ctrl-B/Ctrl-F with `click_keys = 
 so it works in bash, zsh and fish, and over ssh in Cisco, Arista and Juniper CLIs. It only
 acts on the line being edited, including soft-wrapped continuation rows, and is inactive
 in full-screen apps, while scrolled back, or when a program has enabled mouse reporting.
-With OSC 133 shell integration it knows exactly where input starts and ignores clicks
-while a command is running.
+With [shell integration](#shell-integration) it knows exactly where input starts and
+ignores clicks while a command is running.
+
+## Shell integration
+
+Shells don't tell the terminal where their prompts are or which folder they're in unless
+you ask them to. Two invisible escape codes do it:
+
+- **OSC 133** marks where each prompt and each typed command starts. It enables prompt
+  jumping (Ctrl+Shift+Z / X), exact click-to-position, and lets highlighting return to the
+  fallback when you leave a network device.
+- **OSC 7** reports the current folder. It lets the Files tab follow the remote shell.
+
+For bash, add this to `~/.bashrc`, locally and on servers you ssh to, then open a new shell:
+
+```bash
+# FeTerm shell integration: prompt marks (OSC 133) + current folder (OSC 7)
+if [[ $- == *i* ]]; then
+    __feterm_cwd() { printf '\e]7;file://%s%s\e\\' "$HOSTNAME" "$PWD"; }
+    PROMPT_COMMAND="__feterm_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+    PS1='\[\e]133;A\e\\\]'"$PS1"'\[\e]133;B\e\\\]'
+fi
+```
+
+Put it after any line that sets `PS1`. It adds to an existing `PROMPT_COMMAND` (Fedora's
+sets the window title) instead of replacing it. Only output from after the snippet is
+loaded has prompt marks, and Ctrl+Shift+X (next prompt) only moves once you have
+scrolled back. Until a pane has sent a mark, the prompt-jump shortcuts just say they need
+shell integration.
 
 ## Icons
 

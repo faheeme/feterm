@@ -34,6 +34,7 @@ typedef struct te_files {
     bool          ssh_pane;        /* the focused pane is an SSH session */
     bool          show_hidden;
     bool          follow;          /* follow the remote shell's folder */
+    char          term_cwd[TE_REMOTE_PATH_MAX]; /* last folder the remote shell reported */
     char          download_dir[1024];   /* expanded */
 
     /* Rows: indices into the remote's entries, after hiding dot files. */
@@ -82,6 +83,7 @@ void files_dialog_result(te_files *fv, int request, char **paths, size_t n, bool
 void files_drop(te_files *fv, const char *path);
 /* The remote shell reported a new folder (OSC 7). */
 void files_follow(te_files *fv, const char *path);
+void files_note_cwd(te_files *fv, const char *path);  /* record only, no navigation */
 
 void files_draw(const te_files *fv, const te_painter *p, const te_ui_colors *c);
 

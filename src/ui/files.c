@@ -188,6 +188,7 @@ void files_set_remote(te_files *fv, te_remote *r, bool ssh_pane)
     fv->ssh_pane = ssh_pane;
     if (r != fv->remote) {
         fv->remote = r;
+        fv->term_cwd[0] = '\0';
         rebuild(fv);
     }
 }
@@ -757,8 +758,16 @@ void files_drop(te_files *fv, const char *path)
     start_upload(fv, one, 1);
 }
 
+void files_note_cwd(te_files *fv, const char *path)
+{
+    if (path != nullptr && path[0] == '/') {
+        (void)str_copy(fv->term_cwd, sizeof fv->term_cwd, path);
+    }
+}
+
 void files_follow(te_files *fv, const char *path)
 {
+    files_note_cwd(fv, path);
     if (fv->follow && ready(fv) && path != nullptr && path[0] == '/' && strcmp(path, remote_cwd(fv->remote)) != 0) {
         remote_list(fv->remote, path);
     }
@@ -812,7 +821,14 @@ bool files_button(te_files *fv, float x, float y, int button, bool down, uint8_t
             break;
         case 4:
             fv->follow = !fv->follow;
-            toast(fv, fv->follow ? "Following the terminal's folder" : "Not following the terminal's folder");
+            if (fv->follow && fv->term_cwd[0] == '/') {
+                if (strcmp(fv->term_cwd, remote_cwd(fv->remote)) != 0) remote_list(fv->remote, fv->term_cwd);
+                toast(fv, "Following the terminal's folder");
+            } else if (fv->follow) {
+                toast(fv, "Following: the remote shell hasn't reported its folder (OSC 7) yet");
+            } else {
+                toast(fv, "Not following the terminal's folder");
+            }
             break;
         case 5: files_menu(fv, F_GOTO); break;
         default: break;

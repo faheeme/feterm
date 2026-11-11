@@ -94,6 +94,7 @@ struct te_remote {
     /* Listing */
     char            cwd[TE_REMOTE_PATH_MAX];
     char            pending_path[TE_REMOTE_PATH_MAX];
+    char            home[TE_REMOTE_PATH_MAX];    /* resolved at connect; empty until then */
     char            list_target[TE_REMOTE_PATH_MAX];
     bool            loading;
     uint32_t        list_gen;
@@ -822,7 +823,8 @@ void remote_refresh(te_remote *r)
 void remote_home(te_remote *r)
 {
     if (r != nullptr) {
-        remote_list(r, ".");
+        /* "." would be joined onto the current folder; list the resolved home. */
+        remote_list(r, r->home[0] != '\0' ? r->home : "/");
     }
 }
 
@@ -1307,6 +1309,9 @@ static void handle_reply(te_remote *r, const te_sftp_reply *rep)
     case K_NONE:
         return;
     case K_HOME:
+        if (rep->type == SSH_FXP_NAME && rep->nnames >= 1 && rep->names[0].name[0] == '/') {
+            (void)str_copy(r->home, sizeof r->home, rep->names[0].name);
+        }
         if (r->loading) {
             start_next(r);   /* something else (following the terminal) is already being listed */
             return;

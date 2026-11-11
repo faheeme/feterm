@@ -45,6 +45,7 @@ struct te_term {
     char            title_stack[TE_TITLE_STACK][TE_TITLE_MAX];
     uint8_t         title_depth;
     char            cwd[1024];
+    char            shell_cwd[1024];   /* last OSC 7 path from any host (remote panes) */
 
     uint32_t        last_cp;
     bool            dirty;
@@ -1532,9 +1533,7 @@ static void osc_cwd(te_term *t, const char *s, size_t len)
     if (path == nullptr) {
         return;
     }
-    if (!osc7_host_is_local(s + 7, (size_t)(path - (s + 7)))) {
-        return;   /* another host's working directory is not ours to switch to */
-    }
+    bool local = osc7_host_is_local(s + 7, (size_t)(path - (s + 7)));
     size_t i = (size_t)(path - s);
     size_t o = 0;
     char out[sizeof t->cwd] = { 0 };
@@ -1558,7 +1557,12 @@ static void osc_cwd(te_term *t, const char *s, size_t len)
         i++;
     }
     out[o] = '\0';
-    (void)str_copy(t->cwd, sizeof t->cwd, out);
+    /* Any host's folder is the shell's (the Files panel follows it over ssh);
+     * only this host's may become our local cwd (new tabs, pane_cwd). */
+    (void)str_copy(t->shell_cwd, sizeof t->shell_cwd, out);
+    if (local) {
+        (void)str_copy(t->cwd, sizeof t->cwd, out);
+    }
 }
 
 /*
@@ -2562,6 +2566,11 @@ uint32_t term_cursor_color(const te_term *t) { return t->cursor_color; }
 const char *term_cwd(const te_term *t)
 {
     return t->cwd;
+}
+
+const char *term_shell_cwd(const te_term *t)
+{
+    return t->shell_cwd;
 }
 
 const char *term_link_uri(const te_term *t, uint16_t id)
