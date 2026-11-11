@@ -1,3 +1,10 @@
+feterm (0.5.6-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: the Files tab's Home and Follow terminal folder
+    buttons work over ssh; README documents shell integration (OSC 133/7).
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Wed, 11 Nov 2026 08:49:48 +0200
+
 feterm (0.5.5-1~ppa1) resolute; urgency=medium
 
   * New upstream release: saved sessions show a vendor or OS logo with a
