@@ -99,8 +99,14 @@ for entry in $series_list; do
         die "debian/changelog starts at $base, not $version-1~ppaN; add the entry before tagging"
     pkgver=${base}~${ubuntu}.1
 
-    if curl -fsS "$lp_api?ws.op=getPublishedSources&source_name=feterm&exact_match=true&version=$pkgver" |
-        grep -q '"total_size": [1-9]'; then
+    # Launchpad's API sits behind squid caches that serve anonymous GETs up to
+    # ~25 minutes old, which can predate an upload: ask for a fresh answer. If
+    # Launchpad can't be asked at all, stop rather than assume it's missing.
+    lp=$(curl -fsS --retry 3 --retry-all-errors --retry-delay 10 --max-time 60 \
+        -H 'Cache-Control: no-cache' \
+        "$lp_api?ws.op=getPublishedSources&source_name=feterm&exact_match=true&version=$pkgver") ||
+        die "can't ask Launchpad whether $pkgver is in $ppa"
+    if grep -q '"total_size": [1-9]' <<<"$lp"; then
         echo "== $pkgver is already in $ppa, skipping $series"
         continue
     fi
