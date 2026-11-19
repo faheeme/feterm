@@ -53,6 +53,9 @@ typedef enum te_action {
     TE_ACT_CLONE_TAB,               /* the focused pane's session again, in a new tab */
     TE_ACT_CLONE_SPLIT_RIGHT,
     TE_ACT_CLONE_SPLIT_DOWN,
+    TE_ACT_RENAME_TAB,              /* edit the active tab's name in place */
+    TE_ACT_MOVE_TAB_LEFT,
+    TE_ACT_MOVE_TAB_RIGHT,
     TE_ACT_COUNT,
 } te_action;
 

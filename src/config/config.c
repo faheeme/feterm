@@ -43,8 +43,11 @@ void config_defaults(te_config *c)
     c->sidebar_visible = true;
     c->keepalive = 30;
     c->anti_idle = 240;
-    c->anti_idle_bytes[0] = 0;   /* a NUL byte: counts as activity, prints nothing */
-    c->anti_idle_len = 1;
+    /* A space then a backspace: counts as activity and leaves the line as it was. A NUL
+     * byte made network CLIs (Arista EOS, FortiOS) take the next Enter as a literal ^M. */
+    c->anti_idle_bytes[0] = ' ';
+    c->anti_idle_bytes[1] = '\b';
+    c->anti_idle_len = 2;
     c->reconnect = TE_RECONNECT_ASK;
     (void)str_copy(c->download_dir, sizeof c->download_dir, "~/Downloads");
     c->follow_terminal = true;

@@ -56,6 +56,12 @@ typedef struct te_chrome {
     int                 tab_bar_h;   /* 0: no tab bar */
     int                 area_x, area_w; /* horizontal extent of the tab bar (the terminal area) */
     const uint32_t     *tab_colors;  /* ntabs entries, 0 = no colour tag; may be nullptr */
+    const char         *edit_text;   /* non-null: tab edit_tab is being renamed, with this text */
+    size_t              edit_tab;
+    size_t              edit_cursor; /* byte offset into edit_text */
+    bool                edit_all;    /* the whole text is selected */
+    bool                dragging;    /* tab drag_tab is being dragged */
+    size_t              drag_tab;
     const int         (*dividers)[4];/* x, y, w, h */
     size_t              ndividers;
     uint32_t            bar_bg, bar_fg, active_bg, active_fg, accent, divider;
@@ -86,6 +92,8 @@ void renderer_chrome(te_renderer *r, const te_chrome *c);
 bool renderer_animating(const te_renderer *r);
 /* Tab index under a point in the tab bar, or -1. */
 int renderer_tab_at(const te_renderer *r, const te_chrome *c, int x, int y);
+/* Rectangle (x, y, w, h) of tab idx in the tab bar. False when there is no such tab. */
+bool renderer_tab_rect(const te_renderer *r, const te_chrome *c, size_t idx, float out[4]);
 
 /*
  * Free-form UI (sidebar, menus, dialogs) drawn on top of everything else, in the UI font:

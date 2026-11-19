@@ -195,6 +195,28 @@ void layout_set_focus(te_layout *l, struct te_pane *p)
     l->tabs[ti].focus = p;
 }
 
+void layout_move_tab(te_layout *l, size_t from, size_t to)
+{
+    if (l == nullptr || from >= l->ntabs || to >= l->ntabs || from == to) {
+        return;
+    }
+    te_tab moving = l->tabs[from];
+    if (from < to) {
+        memmove(&l->tabs[from], &l->tabs[from + 1], (to - from) * sizeof l->tabs[0]);
+    } else {
+        memmove(&l->tabs[to + 1], &l->tabs[to], (from - to) * sizeof l->tabs[0]);
+    }
+    l->tabs[to] = moving;
+    /* Keep the same tab active wherever it went. */
+    if (l->active == from) {
+        l->active = to;
+    } else if (from < to && l->active > from && l->active <= to) {
+        l->active--;
+    } else if (from > to && l->active >= to && l->active < from) {
+        l->active++;
+    }
+}
+
 void layout_select_tab(te_layout *l, size_t idx)
 {
     if (idx < l->ntabs) {

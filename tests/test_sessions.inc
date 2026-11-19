@@ -717,7 +717,10 @@ static void test_example_config(void)
     te_config c;
     config_defaults(&c);
     CHECK(config_load(&c, "data/config.ini.example") == TE_OK);
-    CHECK(c.anti_idle == 240 && c.anti_idle_len == 1 && c.anti_idle_bytes[0] == 0);
+    CHECK(c.anti_idle == 240 && c.anti_idle_len == 2 && c.anti_idle_bytes[0] == ' ' && c.anti_idle_bytes[1] == '\b');
+    te_config d;
+    config_defaults(&d);                                                  /* the built-in default matches */
+    CHECK(d.anti_idle_len == 2 && memcmp(d.anti_idle_bytes, " \b", 2) == 0);
     CHECK(c.keepalive == 30 && c.reconnect == TE_RECONNECT_ASK && !c.sidebar_right && c.sidebar_width == 280.0f);
     CHECK(c.keys.b[TE_ACT_TOGGLE_SIDEBAR][0].key == TE_KEY_CHAR && c.keys.b[TE_ACT_SEND_BREAK][0].key == TE_KEY_PAUSE);
 }

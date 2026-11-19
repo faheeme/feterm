@@ -2,6 +2,7 @@
 #ifndef TE_LINETEXT_H
 #define TE_LINETEXT_H
 
+#include <stdbool.h>
 #include "common.h"
 #include "vt/term.h"
 
@@ -18,6 +19,13 @@ typedef struct te_textpos {
  */
 size_t linetext_append(const te_cell *cells, uint16_t n, uint32_t row, char *buf, te_textpos *map,
                        size_t len, size_t cap);
+
+/*
+ * True when the text looks like a pager's "more" prompt: Cisco, Arista and
+ * FortiOS "--More--", "-- More --", or Junos "---(more 50%)---". A key typed
+ * there pages the output instead of being ignored.
+ */
+bool linetext_is_pager_prompt(const char *s);
 
 /* Number of cells up to and including the last non-empty one. */
 uint16_t linetext_trimmed(const te_cell *cells, uint16_t n);

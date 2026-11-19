@@ -35,11 +35,13 @@
 #include "sessions/serial.h"
 #include "sessions/telnet.h"
 #include "ui/files.h"
+#include "ui/linetext.h"
 #include "ui/paint.h"
 #include "ui/scrollbar.h"
 #include "ui/search.h"
 #include "ui/selection.h"
 #include "ui/sidebar.h"
+#include "ui/tabbar.h"
 #include "ui/url.h"
 #include "util/log.h"
 #include "util/mem.h"
@@ -134,6 +136,7 @@ typedef struct app {
     char          tab_title_buf[TE_MAX_TABS][96];
     const char   *tab_titles[TE_MAX_TABS];
     uint32_t      tab_colors[TE_MAX_TABS];
+    te_tabbar_ui  tb;                /* tab menu, rename in place, drag, close-tabs question */
 
     /* Sidebar and sessions */
     te_sidebar    sb;
@@ -629,7 +632,11 @@ static void close_pane(app *a, te_pane *p)
     if (p->tag >= 0) {
         plat_unwatch_fd(a->plat, p->tag);
     }
+    size_t tabs_before = a->layout.ntabs;
     bool empty = layout_remove(&a->layout, p);
+    if (a->layout.ntabs != tabs_before) {
+        tabbar_reset(&a->tb);   /* tab positions changed under the menu, rename or drag */
+    }
     pane_destroy(&p);
     if (empty) {
         a->running = false;
@@ -898,6 +905,22 @@ static void sidebar_live_sync(app *a)
     }
 }
 
+/* The cursor's row reads like a pager prompt ("--More--"), where a key pages the output. */
+static bool cursor_on_pager(const te_pane *p)
+{
+    uint16_t cx = 0;
+    uint16_t cy = 0;
+    term_cursor(p->term, &cx, &cy);
+    const te_line *l = term_grid_line(p->term, cy);
+    if (l == nullptr || l->cells == nullptr) {
+        return false;
+    }
+    char text[512] = { 0 };
+    te_textpos map[sizeof text] = { 0 };
+    (void)linetext_append(l->cells, linetext_trimmed(l->cells, l->cols), 0, text, map, 0, sizeof text);
+    return linetext_is_pager_prompt(text);
+}
+
 static int service_anti_idle(app *a, uint64_t now)
 {
     if (a->cfg.anti_idle_len == 0) {
@@ -918,9 +941,9 @@ static int service_anti_idle(app *a, uint64_t now)
         uint64_t last = TE_MAX(TE_MAX(p->last_input_ms, p->last_anti_ms), p->started_ms);
         uint64_t due = last + (uint64_t)secs * 1000u;
         if (now >= due) {
-            /* Never type into a full-screen program (vim, less, top): there the byte
-             * could mean something, and those programs are not idle sessions. */
-            if (!term_modes(p->term)->alt_screen) {
+            /* Never type into a full-screen program (vim, less, top) or a device's
+             * "--More--" pager: there the bytes could mean something. */
+            if (!term_modes(p->term)->alt_screen && !cursor_on_pager(p)) {
                 pane_queue(p, a->cfg.anti_idle_bytes, a->cfg.anti_idle_len);
             }
             p->last_anti_ms = now;
@@ -1427,6 +1450,11 @@ static void jump_prompt(app *a, te_pane *p, int dir)
     }
 }
 
+static void tab_rename_begin(app *a, size_t idx);
+static void tab_move(app *a, size_t from, size_t to);
+static void tab_ui_key(app *a, const te_event *ev, uint32_t kmods);
+static void tab_ui_text(app *a, const char *utf8);
+
 static void do_action(app *a, te_action act)
 {
     te_pane *p = focus_pane(a);
@@ -1472,6 +1500,13 @@ static void do_action(app *a, te_action act)
     case TE_ACT_CLONE_TAB:        clone_pane(a, OPEN_TAB); break;
     case TE_ACT_CLONE_SPLIT_RIGHT: clone_pane(a, OPEN_SPLIT_RIGHT); break;
     case TE_ACT_CLONE_SPLIT_DOWN: clone_pane(a, OPEN_SPLIT_DOWN); break;
+    case TE_ACT_RENAME_TAB:       tab_rename_begin(a, a->layout.active); break;
+    case TE_ACT_MOVE_TAB_LEFT:
+        if (a->layout.active > 0) tab_move(a, a->layout.active, a->layout.active - 1);
+        break;
+    case TE_ACT_MOVE_TAB_RIGHT:
+        if (a->layout.active + 1 < a->layout.ntabs) tab_move(a, a->layout.active, a->layout.active + 1);
+        break;
     case TE_ACT_FOCUS_NEXT_PANE:  layout_cycle_focus(&a->layout, 1); update_window_title(a); break;
     case TE_ACT_FOCUS_PREV_PANE:  layout_cycle_focus(&a->layout, -1); update_window_title(a); break;
     case TE_ACT_RESIZE_LEFT:      if (layout_resize(&a->layout, -1, 0, RESIZE_STEP)) relayout(a); break;
@@ -1509,7 +1544,7 @@ static void on_key(app *a, const te_event *ev)
     if (kev == TE_KEYEV_RELEASE) {
         /* Releases only matter to programs that asked for them (kitty flag 2). */
         if ((term_modes(p->term)->kitty_flags & 2u) != 0 && a->pending_paste == nullptr &&
-            !search_is_open(p->search)) {
+            !search_is_open(p->search) && !tabbar_captures(&a->tb)) {
             char buf[64] = { 0 };
             size_t n = keys_encode_ev(ev->key.key, ev->key.cp, ev->key.mods, kev, term_modes(p->term), buf, sizeof buf);
             if (n > 0) {
@@ -1525,6 +1560,12 @@ static void on_key(app *a, const te_event *ev)
     uint32_t kmods = ev->key.mods & (TE_MOD_SHIFT | TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER);
     /* Printable keys without Ctrl/Alt arrive again as text; only those may produce text. */
     bool printable = ev->key.key == TE_KEY_CHAR && (kmods & (TE_MOD_CTRL | TE_MOD_ALT | TE_MOD_SUPER)) == 0;
+    if (tabbar_captures(&a->tb)) {
+        /* Tab menu, rename box or close question: nothing reaches the terminal. */
+        tab_ui_key(a, ev, kmods);
+        a->suppress_text = !printable || !a->tb.editing;
+        return;
+    }
     if (sidebar_captures(&a->sb)) {
         /* A menu or dialog is open: it gets everything (paste goes into the field). */
         te_action pa = keymap_lookup(&a->cfg.keys, ev->key.key, ev->key.cp, kmods);
@@ -1591,6 +1632,10 @@ static void on_text(app *a, const te_event *ev)
     te_pane *p = focus_pane(a);
     if (a->suppress_text) {
         a->suppress_text = false;
+        return;
+    }
+    if (tabbar_captures(&a->tb)) {
+        tab_ui_text(a, ev->text.text);
         return;
     }
     if (sidebar_focused(&a->sb)) {
@@ -1812,7 +1857,7 @@ static te_chrome make_chrome(app *a)
 {
     for (size_t i = 0; i < a->layout.ntabs; i++) {
         const te_tab *t = &a->layout.tabs[i];
-        const char *title = t->focus != nullptr ? tab_label(t->focus) : "";
+        const char *title = t->name[0] != '\0' ? t->name : (t->focus != nullptr ? tab_label(t->focus) : "");
         a->tab_colors[i] = t->focus != nullptr && t->focus->sess != nullptr ? tag_color_rgb(t->focus->sess->eff.color) : 0;
         if (t->npanes > 1) {
             (void)str_fmt(a->tab_title_buf[i], sizeof a->tab_title_buf[i], "%s [%zu]", title, t->npanes);
@@ -1834,6 +1879,12 @@ static te_chrome make_chrome(app *a)
         .area_x = ax,
         .area_w = aw,
         .tab_colors = a->tab_colors,
+        .edit_text = a->tb.editing && a->tb.edit_tab < a->layout.ntabs ? a->tb.edit.value : nullptr,
+        .edit_tab = a->tb.edit_tab,
+        .edit_cursor = a->tb.edit.cursor,
+        .edit_all = a->tb.edit_all,
+        .dragging = a->tb.dragging && a->tb.press_tab < a->layout.ntabs,
+        .drag_tab = a->tb.press_tab,
         .bar_bg = a->theme.ansi[0],
         .bar_fg = a->theme.fg,
         .active_bg = a->theme.bg,
@@ -1845,6 +1896,289 @@ static te_chrome make_chrome(app *a)
         .dim_bg = a->theme.bg,
         .scale = a->scale,
     };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Tab bar: right-click menu, rename in place, drag to reorder */
+
+static te_painter ui_painter(app *a)
+{
+    te_painter p = { 0 };
+    renderer_painter(a->ren, a->scale, &p);
+    return p;
+}
+
+/* A session in the tab is down and can be started again. */
+static bool tab_reconnectable(const app *a, size_t idx)
+{
+    te_pane *list[TE_MAX_PANES_PER_TAB] = { 0 };
+    size_t n = idx < a->layout.ntabs ? layout_tab_panes(&a->layout.tabs[idx], list, TE_ARRAY_LEN(list)) : 0;
+    for (size_t i = 0; i < n; i++) {
+        if (list[i]->sess != nullptr && list[i]->disconnected) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void close_tab(app *a, size_t idx)
+{
+    if (idx >= a->layout.ntabs) {
+        return;
+    }
+    te_pane *list[TE_MAX_PANES_PER_TAB] = { 0 };
+    size_t n = layout_tab_panes(&a->layout.tabs[idx], list, TE_ARRAY_LEN(list));
+    for (size_t i = 0; i < n && a->running; i++) {
+        close_pane(a, list[i]);
+    }
+}
+
+/* Close every tab but keep (right_only: only those after keep), highest index first
+ * so the indices still to visit stay valid. */
+static void close_tabs_except(app *a, size_t keep, bool right_only)
+{
+    for (size_t i = a->layout.ntabs; i-- > 0 && a->running;) {
+        if (i == keep || (right_only && i < keep)) {
+            continue;
+        }
+        close_tab(a, i);
+    }
+    update_window_title(a);
+}
+
+static void tab_rename_commit(app *a)
+{
+    if (!a->tb.editing) {
+        return;
+    }
+    if (a->tb.edit_tab < a->layout.ntabs) {
+        te_tab *t = &a->layout.tabs[a->tb.edit_tab];
+        tabbar_edit_value(&a->tb, t->name, sizeof t->name);   /* "" restores the automatic title */
+    }
+    tabbar_edit_end(&a->tb);
+    a->need_render = true;
+}
+
+static void tab_rename_begin(app *a, size_t idx)
+{
+    if (idx >= a->layout.ntabs) {
+        return;
+    }
+    if (tab_bar_height(a) <= 0) {
+        show_toast(a, "The tab bar is hidden (set tab_bar = always to rename a single tab)");
+        return;
+    }
+    const te_tab *t = &a->layout.tabs[idx];
+    const char *current = t->name[0] != '\0' ? t->name : (t->focus != nullptr ? tab_label(t->focus) : "");
+    tabbar_edit_begin(&a->tb, idx, current);
+    sidebar_blur(&a->sb);
+    a->need_render = true;
+}
+
+static void tab_move(app *a, size_t from, size_t to)
+{
+    tab_rename_commit(a);
+    layout_move_tab(&a->layout, from, to);
+    a->need_render = true;
+}
+
+static void open_tab_menu(app *a, size_t idx, float x, float y)
+{
+    if (idx >= a->layout.ntabs) {
+        return;
+    }
+    tab_rename_commit(a);
+    te_tabbar_menu_ctx ctx = {
+        .tab = idx,
+        .ntabs = a->layout.ntabs,
+        .named = a->layout.tabs[idx].name[0] != '\0',
+        .can_reconnect = tab_reconnectable(a, idx),
+        .keys = &a->cfg.keys,
+    };
+    te_menu_item items[TE_MENU_MAX_ITEMS] = { 0 };
+    size_t n = tabbar_menu_items(&ctx, items, TE_ARRAY_LEN(items));
+    te_painter p = ui_painter(a);
+    menu_open(&a->tb.menu, items, n, x, y, (float)a->width, (float)a->height, &p);
+    a->tb.menu_tab = idx;
+    a->need_render = true;
+}
+
+static void open_close_tabs_question(app *a, size_t keep, bool right_only)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < a->layout.ntabs; i++) {
+        if (i != keep && (!right_only || i > keep)) {
+            count++;
+        }
+    }
+    if (count == 0) {
+        return;
+    }
+    char ok[24] = { 0 };
+    (void)str_fmt(ok, sizeof ok, count == 1 ? "Close %zu tab" : "Close %zu tabs", count);
+    form_init(&a->tb.confirm, right_only ? TE_TB_CONFIRM_RIGHT : TE_TB_CONFIRM_OTHERS, "Close tabs", ok);
+    (void)str_fmt(a->tb.confirm.message, sizeof a->tb.confirm.message,
+                  right_only ? "Close the %zu tab%s to the right? Their sessions end."
+                             : "Close the %zu other tab%s? Their sessions end.",
+                  count, count == 1 ? "" : "s");
+    a->tb.confirm.danger = true;
+    a->tb.confirm.focus = 1;   /* no fields: 0 is OK, 1 is Cancel, the safe default */
+    a->tb.confirm_tab = keep;
+    te_painter p = ui_painter(a);
+    form_layout(&a->tb.confirm, &p, (float)a->width, (float)a->height);
+    a->need_render = true;
+}
+
+static void tab_confirm_result(app *a, te_form_result r)
+{
+    if (r != TE_FORM_SUBMIT) {
+        return;   /* Cancel and Esc close the dialog themselves */
+    }
+    bool right_only = a->tb.confirm.purpose == TE_TB_CONFIRM_RIGHT;
+    size_t keep = a->tb.confirm_tab;
+    a->tb.confirm.open = false;
+    if (keep < a->layout.ntabs) {
+        close_tabs_except(a, keep, right_only);
+    }
+}
+
+static void run_tab_menu(app *a, int id)
+{
+    size_t idx = a->tb.menu_tab;
+    if (idx >= a->layout.ntabs) {
+        return;
+    }
+    switch (id) {
+    case TE_TB_RENAME:      tab_rename_begin(a, idx); break;
+    case TE_TB_RESET_NAME:  a->layout.tabs[idx].name[0] = '\0'; break;
+    case TE_TB_SPLIT_RIGHT:
+    case TE_TB_SPLIT_DOWN:
+        layout_select_tab(&a->layout, idx);
+        clone_pane(a, id == TE_TB_SPLIT_RIGHT ? OPEN_SPLIT_RIGHT : OPEN_SPLIT_DOWN);
+        break;
+    case TE_TB_DUPLICATE:
+        layout_select_tab(&a->layout, idx);
+        clone_pane(a, OPEN_TAB);
+        break;
+    case TE_TB_RECONNECT: {
+        te_pane *list[TE_MAX_PANES_PER_TAB] = { 0 };
+        size_t n = layout_tab_panes(&a->layout.tabs[idx], list, TE_ARRAY_LEN(list));
+        for (size_t i = 0; i < n; i++) {
+            reconnect_pane(a, list[i]);   /* does nothing for a pane that is up */
+        }
+        break;
+    }
+    case TE_TB_MOVE_LEFT:   if (idx > 0) tab_move(a, idx, idx - 1); break;
+    case TE_TB_MOVE_RIGHT:  if (idx + 1 < a->layout.ntabs) tab_move(a, idx, idx + 1); break;
+    case TE_TB_CLOSE:       close_tab(a, idx); break;
+    case TE_TB_CLOSE_OTHERS: open_close_tabs_question(a, idx, false); break;
+    case TE_TB_CLOSE_RIGHT: open_close_tabs_question(a, idx, true); break;
+    default: break;
+    }
+    update_window_title(a);
+    a->need_render = true;
+}
+
+/* A key while the tab menu, the rename box or the close question is open. */
+static void tab_ui_key(app *a, const te_event *ev, uint32_t kmods)
+{
+    if (a->tb.confirm.open) {
+        tab_confirm_result(a, form_key(&a->tb.confirm, ev->key.key, ev->key.mods));
+    } else if (a->tb.menu.open) {
+        int id = menu_key(&a->tb.menu, ev->key.key);
+        if (id > 0) {
+            run_tab_menu(a, id);
+        }
+    } else if (a->tb.editing) {
+        te_action pa = keymap_lookup(&a->cfg.keys, ev->key.key, ev->key.cp, kmods);
+        if (pa == TE_ACT_PASTE || pa == TE_ACT_PASTE_PRIMARY) {
+            char *clip = pa == TE_ACT_PASTE ? plat_clipboard_get(a->plat) : plat_primary_get(a->plat);
+            if (clip != nullptr) {
+                (void)tabbar_edit_text(&a->tb, clip);   /* too long, or only control characters: ignored */
+                TE_FREE(clip);
+            }
+        } else {
+            te_tb_edit r = tabbar_edit_key(&a->tb, ev->key.key, ev->key.mods);
+            if (r == TE_TB_EDIT_SUBMIT) {
+                tab_rename_commit(a);
+            } else if (r == TE_TB_EDIT_CANCEL) {
+                tabbar_edit_end(&a->tb);
+            }
+        }
+    }
+    a->need_render = true;
+}
+
+static void tab_ui_text(app *a, const char *utf8)
+{
+    if (a->tb.editing && !a->tb.menu.open && !a->tb.confirm.open) {
+        (void)tabbar_edit_text(&a->tb, utf8);
+        a->need_render = true;
+    }
+}
+
+/* A mouse button while the tab menu, rename box or question is open. True: consumed. */
+static bool tab_ui_button(app *a, const te_event *ev, int b)
+{
+    float x = ev->button.x;
+    float y = ev->button.y;
+    if (a->tb.confirm.open) {
+        if (ev->button.down && b == TE_MB_LEFT) {
+            te_painter p = ui_painter(a);
+            form_layout(&a->tb.confirm, &p, (float)a->width, (float)a->height);
+            tab_confirm_result(a, form_click(&a->tb.confirm, x, y, &p));
+            a->need_render = true;
+        }
+        return true;   /* modal */
+    }
+    if (a->tb.menu.open) {
+        if (ev->button.down) {
+            te_painter p = ui_painter(a);
+            int id = menu_click(&a->tb.menu, x, y, &p);
+            if (id > 0) {
+                run_tab_menu(a, id);
+            }
+            /* A click outside closes the menu and does nothing else. */
+            a->need_render = true;
+        }
+        return true;
+    }
+    if (a->tb.editing && ev->button.down) {
+        te_chrome c = make_chrome(a);
+        float r[4] = { 0 };
+        if (renderer_tab_rect(a->ren, &c, a->tb.edit_tab, r) && x >= r[0] && x < r[0] + r[2] && y >= r[1] &&
+            y < r[1] + r[3]) {
+            return true;   /* inside the box: keep editing */
+        }
+        tab_rename_commit(a);   /* a click elsewhere keeps the new name, then acts as usual */
+    }
+    return false;
+}
+
+/* Left button held on a tab: past a small threshold the tab follows the pointer. */
+static void tab_drag(app *a, float x)
+{
+    te_chrome c = make_chrome(a);
+    float r[4] = { 0 };
+    if (a->tb.press_tab >= a->layout.ntabs || !renderer_tab_rect(a->ren, &c, 0, r)) {
+        a->tb.pressed = false;
+        a->tb.dragging = false;
+        return;
+    }
+    if (!a->tb.dragging) {
+        float thr = 4.0f * (a->scale > 0.0f ? a->scale : 1.0f);
+        if (fabsf(x - a->tb.press_x) < thr) {
+            return;
+        }
+        a->tb.dragging = true;
+        tab_rename_commit(a);
+    }
+    size_t to = tabbar_drag_slot(a->tb.press_tab, x, (float)c.area_x, r[2], a->layout.ntabs);
+    if (to != a->tb.press_tab) {
+        layout_move_tab(&a->layout, a->tb.press_tab, to);
+        a->tb.press_tab = to;
+    }
+    a->need_render = true;
 }
 
 /* The button that pastes the selection ([mouse] mouse_paste). */
@@ -1869,6 +2203,10 @@ static void on_button(app *a, const te_event *ev)
     int ix = (int)ev->button.x;
     int iy = (int)ev->button.y;
 
+    /* The tab bar's menu, rename box and question come first: they float over everything. */
+    if (tabbar_captures(&a->tb) && tab_ui_button(a, ev, b)) {
+        return;
+    }
     /* The sidebar first: its menus and dialogs, drags, resizing, or a click inside it. */
     bool sb_busy = sidebar_captures(&a->sb) || a->sb.pressed || a->sb.resizing;
     if (sb_busy || (ev->button.down && a->buttons_held == 0 &&
@@ -1886,23 +2224,39 @@ static void on_button(app *a, const te_event *ev)
     if (ev->button.down) {
         sidebar_blur(&a->sb);   /* a click in the terminal gives it the keyboard back */
     }
+    /* Releasing a tab ends its drag wherever the pointer is. */
+    if (!ev->button.down && b == TE_MB_LEFT && a->tb.pressed) {
+        a->tb.pressed = false;
+        a->tb.dragging = false;
+        a->need_render = true;
+        return;
+    }
 
     int area_x = 0;
     int area_w = 0;
     term_area(a, &area_x, &area_w);
     if (ev->button.down) {
-        /* Tab bar: select a tab (middle click closes it). */
+        /* Tab bar: left selects (twice renames, held drags), middle closes,
+         * right only opens the tab's menu. */
         if (iy < tab_bar_height(a) && ix >= area_x && ix < area_x + area_w) {
             te_chrome c = make_chrome(a);
             int ti = renderer_tab_at(a->ren, &c, ix, iy);
             if (ti >= 0) {
-                layout_select_tab(&a->layout, (size_t)ti);
+                size_t idx = (size_t)ti;
+                if (b == TE_MB_RIGHT) {
+                    open_tab_menu(a, idx, ev->button.x, ev->button.y);
+                    return;
+                }
+                layout_select_tab(&a->layout, idx);
                 if (b == TE_MB_MIDDLE) {
-                    te_pane *list[TE_MAX_PANES_PER_TAB] = { 0 };
-                    size_t n = layout_tab_panes(&a->layout.tabs[ti], list, TE_ARRAY_LEN(list));
-                    for (size_t i = 0; i < n && a->running; i++) {
-                        close_pane(a, list[i]);
-                    }
+                    close_tab(a, idx);
+                } else if (b == TE_MB_LEFT && ev->button.clicks >= 2) {
+                    tab_rename_begin(a, idx);
+                } else if (b == TE_MB_LEFT) {
+                    a->tb.pressed = true;
+                    a->tb.dragging = false;
+                    a->tb.press_tab = idx;
+                    a->tb.press_x = ev->button.x;
                 }
                 update_window_title(a);
                 a->need_render = true;
@@ -2027,6 +2381,25 @@ static void on_motion(app *a, const te_event *ev)
 {
     uint32_t mods = ev->motion.mods;
     bool left = (ev->motion.buttons & 1u) != 0;
+    if (a->tb.menu.open) {
+        te_painter p = ui_painter(a);
+        int old = a->tb.menu.hover;
+        menu_motion(&a->tb.menu, ev->motion.x, ev->motion.y, &p);
+        a->need_render = a->need_render || old != a->tb.menu.hover;
+        return;
+    }
+    if (a->tb.confirm.open) {
+        return;
+    }
+    if (a->tb.pressed) {
+        if (left) {
+            tab_drag(a, ev->motion.x);
+            return;
+        }
+        a->tb.pressed = false;   /* the release happened where we did not see it */
+        a->tb.dragging = false;
+        a->need_render = true;
+    }
     if (sidebar_captures(&a->sb) || a->sb.pressed || a->sb.resizing) {
         (void)sidebar_motion(&a->sb, ev->motion.x, ev->motion.y, left);
         if (sidebar_take_layout_change(&a->sb)) {
@@ -2419,7 +2792,8 @@ static void render(app *a, uint64_t now)
     c.toast = now < a->toast_until_ms ? a->toast : nullptr;
     c.modal = a->pending_paste != nullptr ? a->modal : nullptr;
     renderer_chrome(a->ren, &c);
-    if (a->sb_ready) {
+    bool tab_overlay = a->tb.menu.open || a->tb.confirm.open;
+    if (a->sb_ready || tab_overlay) {
         const te_theme *t = &a->theme;
         te_ui_colors uc = {
             .bg = ui_mix(t->bg, 0x000000, 0.18f),
@@ -2435,10 +2809,19 @@ static void render(app *a, uint64_t now)
         };
         te_painter painter;
         renderer_painter(a->ren, a->scale, &painter);
-        layout_sidebar(a);
-        sidebar_live_sync(a);
         renderer_ui_begin(a->ren);
-        sidebar_draw(&a->sb, &painter, &uc);
+        if (a->sb_ready) {
+            layout_sidebar(a);
+            sidebar_live_sync(a);
+            sidebar_draw(&a->sb, &painter, &uc);
+        }
+        /* The tab bar's menu and question float over everything, the sidebar included. */
+        menu_draw(&a->tb.menu, &painter, &uc);
+        if (a->tb.confirm.open) {
+            ui_rect(&painter, TE_LAYER_OVERLAY, 0.0f, 0.0f, (float)a->width, (float)a->height, 0x000000, 0.35f);
+            form_layout(&a->tb.confirm, &painter, (float)a->width, (float)a->height);
+            form_draw(&a->tb.confirm, &painter, &uc);
+        }
         renderer_ui_end(a->ren);
     }
     if (renderer_end(a->ren) == TE_OK) {
@@ -2614,6 +2997,7 @@ int main(int argc, char **argv)
     a.watch.fd = -1;   /* the Windows watch is all nullptrs when unused */
 #endif
     a.watch_tag = -1;
+    tabbar_init(&a.tb);
     int rc = parse_cli(argc, argv, &a.cli);
     if (rc != 0) {
         return rc > 0 ? EXIT_SUCCESS : EXIT_FAILURE;

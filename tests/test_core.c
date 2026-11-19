@@ -21,6 +21,8 @@
 #include "ui/search.h"
 #include "ui/selection.h"
 #include "ui/url.h"
+#include "ui/linetext.h"
+#include "ui/tabbar.h"
 #include "config/theme.h"
 #include "input/keys.h"
 #include "util/mem.h"
@@ -1466,6 +1468,151 @@ static void box_cb(void *u, float x, float y, float w, float h, float a)
     b->alpha = a;
 }
 
+static void test_tab_move(void)
+{
+    char d[6];
+    struct te_pane *p[6];
+    for (int i = 0; i < 6; i++) p[i] = (struct te_pane *)(void *)&d[i];
+    te_layout l;
+    layout_init(&l, 2);
+    for (int i = 0; i < 4; i++) CHECK(layout_add_tab(&l, p[i]) == TE_OK);   /* tabs 0 1 2 3 */
+    (void)str_copy(l.tabs[0].name, sizeof l.tabs[0].name, "zero");
+    (void)str_copy(l.tabs[2].name, sizeof l.tabs[2].name, "two");
+    CHECK(l.tabs[1].name[0] == '\0' && l.tabs[3].name[0] == '\0');       /* new tabs: automatic title */
+    layout_select_tab(&l, 2);
+    layout_move_tab(&l, 0, 3);                                             /* 1 2 3 0 */
+    CHECK(l.tabs[3].focus == p[0] && strcmp(l.tabs[3].name, "zero") == 0);
+    CHECK(l.tabs[0].focus == p[1] && l.tabs[1].focus == p[2] && strcmp(l.tabs[1].name, "two") == 0);
+    CHECK(l.active == 1 && layout_focus(&l) == p[2]);                      /* the active tab followed */
+    layout_move_tab(&l, 3, 0);                                             /* 0 1 2 3 */
+    CHECK(l.tabs[0].focus == p[0] && l.tabs[3].focus == p[3] && l.active == 2);
+    layout_move_tab(&l, 2, 2);
+    layout_move_tab(&l, 9, 0);
+    layout_move_tab(&l, 0, 4);                                             /* out of range: nothing */
+    CHECK(l.tabs[2].focus == p[2] && l.active == 2);
+    layout_move_tab(&l, 2, 1);                                             /* moving the active tab */
+    CHECK(l.active == 1 && l.tabs[1].focus == p[2]);
+    CHECK(!layout_remove(&l, p[0]));                                       /* names stay with their tabs */
+    CHECK(l.ntabs == 3 && strcmp(l.tabs[0].name, "two") == 0 && l.tabs[0].focus == p[2]);
+    layout_destroy(&l);
+
+    CHECK(tabbar_drag_slot(0, 5.0f, 0.0f, 100.0f, 4) == 0);
+    CHECK(tabbar_drag_slot(0, 250.0f, 0.0f, 100.0f, 4) == 2);
+    CHECK(tabbar_drag_slot(1, 9999.0f, 0.0f, 100.0f, 4) == 3);              /* past the end: last */
+    CHECK(tabbar_drag_slot(2, -50.0f, 0.0f, 100.0f, 4) == 0);
+    CHECK(tabbar_drag_slot(2, 250.0f, 0.0f, 0.0f, 4) == 2);                 /* no width: stays */
+}
+
+static int menu_find(const te_menu_item *it, size_t n, int id)
+{
+    for (size_t i = 0; i < n; i++) {
+        if (it[i].id == id) return (int)i;
+    }
+    return -1;
+}
+
+static void test_tab_menu(void)
+{
+    te_keymap km;
+    keymap_defaults(&km);
+    te_menu_item it[TE_MENU_MAX_ITEMS];
+    te_tabbar_menu_ctx ctx = { .tab = 0, .ntabs = 1, .keys = &km };
+    size_t n = tabbar_menu_items(&ctx, it, TE_ARRAY_LEN(it));
+    CHECK(n > 0 && n <= TE_MENU_MAX_ITEMS);
+    CHECK(it[menu_find(it, n, TE_TB_RENAME)].enabled);
+    CHECK(!it[menu_find(it, n, TE_TB_RESET_NAME)].enabled);               /* nothing to reset */
+    CHECK(menu_find(it, n, TE_TB_RECONNECT) < 0);                           /* only when a session is down */
+    CHECK(!it[menu_find(it, n, TE_TB_MOVE_LEFT)].enabled && !it[menu_find(it, n, TE_TB_MOVE_RIGHT)].enabled);
+    CHECK(!it[menu_find(it, n, TE_TB_CLOSE_OTHERS)].enabled && !it[menu_find(it, n, TE_TB_CLOSE_RIGHT)].enabled);
+    CHECK(it[menu_find(it, n, TE_TB_CLOSE)].enabled && it[menu_find(it, n, TE_TB_CLOSE)].danger);
+    CHECK(it[menu_find(it, n, TE_TB_SPLIT_RIGHT)].hint[0] != '\0');        /* shows the clone-split key */
+
+    ctx = (te_tabbar_menu_ctx){ .tab = 1, .ntabs = 3, .named = true, .can_reconnect = true, .keys = nullptr };
+    n = tabbar_menu_items(&ctx, it, TE_ARRAY_LEN(it));
+    CHECK(it[menu_find(it, n, TE_TB_RESET_NAME)].enabled && menu_find(it, n, TE_TB_RECONNECT) >= 0);
+    CHECK(it[menu_find(it, n, TE_TB_MOVE_LEFT)].enabled && it[menu_find(it, n, TE_TB_MOVE_RIGHT)].enabled);
+    CHECK(it[menu_find(it, n, TE_TB_CLOSE_OTHERS)].enabled && it[menu_find(it, n, TE_TB_CLOSE_RIGHT)].enabled);
+    CHECK(it[menu_find(it, n, TE_TB_SPLIT_RIGHT)].hint[0] == '\0');        /* no keymap: no hints */
+    ctx.tab = 2;
+    n = tabbar_menu_items(&ctx, it, TE_ARRAY_LEN(it));
+    CHECK(!it[menu_find(it, n, TE_TB_MOVE_RIGHT)].enabled && !it[menu_find(it, n, TE_TB_CLOSE_RIGHT)].enabled);
+    ctx.tab = 3;                                                            /* no such tab */
+    CHECK(tabbar_menu_items(&ctx, it, TE_ARRAY_LEN(it)) == 0);
+    CHECK(tabbar_menu_items(&ctx, it, 4) == 0);                             /* too small a buffer */
+}
+
+static void test_tab_rename(void)
+{
+    te_tabbar_ui ui;
+    tabbar_init(&ui);
+    CHECK(!tabbar_captures(&ui));
+    CHECK(tabbar_edit_key(&ui, TE_KEY_ENTER, 0) == TE_TB_EDIT_NONE);       /* not editing */
+    tabbar_edit_begin(&ui, 1, "router1");
+    CHECK(ui.editing && ui.edit_tab == 1 && tabbar_captures(&ui));
+    CHECK(strcmp(ui.edit.value, "router1") == 0 && ui.edit.cursor == 7 && ui.edit_all);
+    CHECK(tabbar_edit_text(&ui, "\x07") == TE_TB_EDIT_NONE && strcmp(ui.edit.value, "router1") == 0);
+    CHECK(tabbar_edit_key(&ui, TE_KEY_END, 0) == TE_TB_EDIT_CHANGED && !ui.edit_all);   /* keeps the text */
+    CHECK(tabbar_edit_key(&ui, TE_KEY_BACKSPACE, 0) == TE_TB_EDIT_CHANGED);
+    CHECK(tabbar_edit_text(&ui, "-core") == TE_TB_EDIT_CHANGED);
+    CHECK(tabbar_edit_text(&ui, "\x1b[A\r\n") == TE_TB_EDIT_CHANGED);    /* control characters dropped */
+    CHECK(strcmp(ui.edit.value, "router-core[A") == 0);
+    CHECK(tabbar_edit_text(&ui, "\x07\x1b") == TE_TB_EDIT_NONE);          /* nothing printable */
+    tabbar_edit_key(&ui, TE_KEY_HOME, 0);
+    CHECK(ui.edit.cursor == 0);
+    CHECK(tabbar_edit_key(&ui, TE_KEY_CHAR, 0) == TE_TB_EDIT_NONE);        /* swallowed */
+    CHECK(tabbar_edit_key(&ui, TE_KEY_ENTER, 0) == TE_TB_EDIT_SUBMIT);
+    CHECK(tabbar_edit_key(&ui, TE_KEY_ESCAPE, 0) == TE_TB_EDIT_CANCEL);
+    tabbar_edit_end(&ui);
+    CHECK(!ui.editing && !tabbar_captures(&ui));
+    tabbar_edit_begin(&ui, 0, "old");                                      /* typing replaces the name */
+    CHECK(tabbar_edit_text(&ui, "new") == TE_TB_EDIT_CHANGED && strcmp(ui.edit.value, "new") == 0);
+    tabbar_edit_begin(&ui, 0, "old");                                      /* Backspace clears it */
+    CHECK(tabbar_edit_key(&ui, TE_KEY_BACKSPACE, 0) == TE_TB_EDIT_CHANGED && ui.edit.value[0] == '\0');
+
+    /* Blanks around the name are dropped; only blanks means "automatic title". */
+    char out[TE_TAB_NAME_MAX + 1];
+    tabbar_edit_begin(&ui, 0, "  core sw  ");
+    tabbar_edit_value(&ui, out, sizeof out);
+    CHECK(strcmp(out, "core sw") == 0);
+    tabbar_edit_begin(&ui, 0, nullptr);
+    CHECK(ui.edit.value[0] == '\0');
+    CHECK(tabbar_edit_text(&ui, "   ") == TE_TB_EDIT_CHANGED);
+    tabbar_edit_value(&ui, out, sizeof out);
+    CHECK(out[0] == '\0');
+
+    /* The name limit holds, and a long title is cut on a character boundary. */
+    char longname[200];
+    memset(longname, 'a', sizeof longname - 1);
+    longname[sizeof longname - 1] = '\0';
+    tabbar_edit_begin(&ui, 0, longname);
+    CHECK(strlen(ui.edit.value) == TE_TAB_NAME_MAX);
+    CHECK(tabbar_edit_key(&ui, TE_KEY_END, 0) == TE_TB_EDIT_CHANGED);
+    CHECK(tabbar_edit_text(&ui, "b") == TE_TB_EDIT_NONE);                  /* full */
+    char euros[200] = { 0 };
+    for (size_t i = 0; i + 3 < sizeof euros; i += 3) memcpy(euros + i, "\xe2\x82\xac", 3);   /* U+20AC */
+    tabbar_edit_begin(&ui, 0, euros);
+    size_t el = strlen(ui.edit.value);
+    CHECK(el > 0 && el <= TE_TAB_NAME_MAX && el % 3 == 0);
+    char small[5];
+    tabbar_edit_value(&ui, small, sizeof small);                            /* 4 bytes: one whole euro sign */
+    CHECK(strcmp(small, "\xe2\x82\xac") == 0);
+    tabbar_reset(&ui);
+    CHECK(!tabbar_captures(&ui) && !ui.pressed && !ui.dragging);
+}
+
+static void test_pager_prompt(void)
+{
+    CHECK(linetext_is_pager_prompt(" --More-- "));
+    CHECK(linetext_is_pager_prompt("--More--"));
+    CHECK(linetext_is_pager_prompt("-- More --"));
+    CHECK(linetext_is_pager_prompt("---(more 42%)---"));
+    CHECK(linetext_is_pager_prompt("---(more)---"));
+    CHECK(!linetext_is_pager_prompt("switch1#"));
+    CHECK(!linetext_is_pager_prompt("FGT01 # show more"));
+    CHECK(!linetext_is_pager_prompt(""));
+    CHECK(!linetext_is_pager_prompt(nullptr));
+}
+
 static void test_boxdraw(void)
 {
     box_acc b = { 0, 1e9f, 1e9f, -1e9f, -1e9f, 0 };
@@ -1633,6 +1780,10 @@ int main(void)
     test_kitty_keyboard();
     test_notifications();
     test_layout();
+    test_tab_move();
+    test_tab_menu();
+    test_tab_rename();
+    test_pager_prompt();
     test_boxdraw();
     test_sixel();
     test_kitty_graphics();
