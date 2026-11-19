@@ -49,6 +49,9 @@ static const char *const action_names[TE_ACT_COUNT] = {
     [TE_ACT_CLONE_TAB] = "clone_tab",
     [TE_ACT_CLONE_SPLIT_RIGHT] = "clone_split_right",
     [TE_ACT_CLONE_SPLIT_DOWN] = "clone_split_down",
+    [TE_ACT_RENAME_TAB] = "rename_tab",
+    [TE_ACT_MOVE_TAB_LEFT] = "move_tab_left",
+    [TE_ACT_MOVE_TAB_RIGHT] = "move_tab_right",
 };
 
 typedef struct key_name {
@@ -197,6 +200,9 @@ void keymap_defaults(te_keymap *m)
     bind(m, TE_ACT_CLONE_TAB, 0, TE_KEY_CHAR, 't', cs | TE_MOD_ALT);
     bind(m, TE_ACT_CLONE_SPLIT_RIGHT, 0, TE_KEY_CHAR, 'e', cs | TE_MOD_ALT);
     bind(m, TE_ACT_CLONE_SPLIT_DOWN, 0, TE_KEY_CHAR, 'o', cs | TE_MOD_ALT);
+    /* Move the active tab, as in GNOME Terminal. rename_tab has no default key. */
+    bind(m, TE_ACT_MOVE_TAB_LEFT, 0, TE_KEY_PAGE_UP, 0, cs);
+    bind(m, TE_ACT_MOVE_TAB_RIGHT, 0, TE_KEY_PAGE_DOWN, 0, cs);
 }
 #endif
 

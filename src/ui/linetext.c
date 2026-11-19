@@ -1,5 +1,8 @@
 #include "ui/linetext.h"
 
+#include <ctype.h>
+#include <stddef.h>
+
 #include "util/utf8.h"
 
 size_t linetext_append(const te_cell *cells, uint16_t n, uint32_t row, char *buf, te_textpos *map,
@@ -49,4 +52,28 @@ uint16_t linetext_trimmed(const te_cell *cells, uint16_t n)
         n--;
     }
     return n;
+}
+
+/* Case-insensitive search for an ASCII needle. */
+static bool has_ci(const char *s, const char *needle)
+{
+    for (; *s != '\0'; s++) {
+        size_t i = 0;
+        while (needle[i] != '\0' && s[i] != '\0' &&
+               tolower((unsigned char)s[i]) == tolower((unsigned char)needle[i])) {
+            i++;
+        }
+        if (needle[i] == '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool linetext_is_pager_prompt(const char *s)
+{
+    if (s == nullptr) {
+        return false;
+    }
+    return has_ci(s, "--more") || has_ci(s, "-- more") || has_ci(s, "-(more");
 }

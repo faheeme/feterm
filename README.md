@@ -232,6 +232,9 @@ feterm [-d DIR] [-c CONFIG] [-T TITLE] [--class ID] [--hold] [-e command args...
 | Ctrl+Shift+E / Ctrl+Shift+O | split right / split down (new panes start in the current directory) |
 | Ctrl+Shift+Alt+T / E / O | clone the focused session into a new tab / split right / split down (SSH reuses the login: no second password, except on Windows) |
 | Ctrl+Tab, Ctrl+PgDn / Ctrl+Shift+Tab, Ctrl+PgUp, Alt+1..9 | next / previous / numbered tab |
+| Ctrl+Shift+PgUp / PgDn, drag a tab | move the tab left / right |
+| Double-click a tab | rename it in place (Enter saves, Esc cancels, empty = automatic title) |
+| Right-click a tab | tab menu (see below) |
 | Ctrl+Shift+] / [ , click | focus next / previous pane |
 | Ctrl+Shift+Alt+arrows, drag a divider | resize panes |
 | Ctrl+Shift+Enter | zoom the focused pane to the whole tab (and back) |
@@ -256,6 +259,7 @@ On macOS the defaults use Cmd instead:
 | Cmd+D / Cmd+Shift+D | split right / split down |
 | Cmd+Option+T / Cmd+Option+D / Cmd+Option+Shift+D | clone the focused session into a new tab / split right / split down |
 | Cmd+Shift+] / [ , Ctrl+Tab, Cmd+1..9 | next / previous / numbered tab |
+| Drag a tab, double-click a tab, right-click a tab | move it / rename it / tab menu |
 | Cmd+] / Cmd+[ | focus next / previous pane |
 | Ctrl+Cmd+arrows | resize panes |
 | Cmd+Shift+Enter | zoom the focused pane |
@@ -268,6 +272,13 @@ On macOS the defaults use Cmd instead:
 Every shortcut can be changed in the `[keys]` section of `config.ini`.
 Every shortcut can be changed in the `[keys]` section of `config.ini` (`cmd` and `option`
 are accepted as names for super and alt).
+
+**Tabs.** Right-clicking a tab only opens its menu; nothing happens until you pick an
+item. The menu has Rename and Reset name; Split right and Split down (the tab's session
+again, like the clone keys); Duplicate tab; Reconnect (when a session in the tab is down);
+Move left / right; and Close tab, Close other tabs and Close tabs to the right (the last
+two ask first). A renamed tab keeps its name until you reset it or clear the name.
+`rename_tab`, `move_tab_left` and `move_tab_right` can be bound in `[keys]`.
 
 New local shells start with a small banner: the FeTerm logo, the version and the author.
 Turn it off with `[terminal] banner = false`. The name, author and email come from the
@@ -314,8 +325,9 @@ or press Ctrl+Shift+B to collapse it to a thin strip.
 - **Staying connected:**
   - SSH and TCP keepalives stop firewalls from dropping idle sessions.
   - Anti-idle stops the device's own idle logout (Cisco `exec-timeout`, Linux `TMOUT`):
-    after 4 minutes without typing, FeTerm sends an invisible NUL byte. Nothing is sent
-    while a full-screen program such as vim or less is open.
+    after 4 minutes without typing, FeTerm sends a space and a backspace, which leave the
+    line as it was. Nothing is sent while a full-screen program such as vim or less is open,
+    or while a device shows a `--More--` prompt.
   - If a connection drops, the tab stays open with its history. Press Enter to reconnect, or
     set `reconnect = auto`.
 - **Passwords are never stored.** Use SSH keys or the agent, or type the password when asked.

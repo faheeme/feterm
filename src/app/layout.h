@@ -13,6 +13,7 @@
 #define TE_MAX_PANES_PER_TAB  16
 #define TE_LAYOUT_MIN_RATIO   0.1f
 #define TE_LAYOUT_MAX_RATIO   0.9f
+#define TE_TAB_NAME_MAX       63   /* bytes of a user-given tab name, without the NUL */
 
 struct te_pane;
 
@@ -31,6 +32,7 @@ typedef struct te_tab {
     struct te_pane *focus;
     bool            zoomed;       /* focus fills the whole tab */
     size_t          npanes;
+    char            name[TE_TAB_NAME_MAX + 1];  /* set by the user; "": automatic title */
 } te_tab;
 
 typedef struct te_layout {
@@ -57,6 +59,8 @@ struct te_pane *layout_focus(const te_layout *l);
 void layout_set_focus(te_layout *l, struct te_pane *p);
 void layout_select_tab(te_layout *l, size_t idx);
 void layout_cycle_tab(te_layout *l, int dir);
+/* Move tab from to position to (both < ntabs); the active tab stays active. */
+void layout_move_tab(te_layout *l, size_t from, size_t to);
 void layout_cycle_focus(te_layout *l, int dir);
 void layout_toggle_zoom(te_layout *l);
 /* Move the nearest divider of the matching orientation by step (fraction of the split). */

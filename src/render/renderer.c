@@ -19,6 +19,7 @@
 #define CACHE_MAX        (1u << 20)
 #define IMG_TEX_CACHE  32
 #define IMG_TEX_IDLE   300u   /* frames before an unused image texture is freed */
+#define TE_TAB_EDIT_CPS 64    /* code points shown while renaming a tab (names are <= 63 bytes) */
 
 typedef struct rect_inst {
     float x, y, w, h;
@@ -1262,6 +1263,67 @@ int renderer_tab_at(const te_renderer *r, const te_chrome *c, int x, int y)
     return i < c->ntabs ? (int)i : -1;
 }
 
+bool renderer_tab_rect(const te_renderer *r, const te_chrome *c, size_t idx, float out[4])
+{
+    if (r == nullptr || c == nullptr || out == nullptr || c->tab_bar_h <= 0 || idx >= c->ntabs) {
+        return false;
+    }
+    float tw = tab_width(r, c);
+    out[0] = (float)c->area_x + (float)idx * tw;
+    out[1] = 0.0f;
+    out[2] = tw;
+    out[3] = (float)c->tab_bar_h;
+    return true;
+}
+
+/* A tab being renamed: a text box with a caret, scrolled so the caret stays visible. */
+static void draw_tab_edit(te_renderer *r, const te_chrome *c, float x, float tw, float bh, float cw, float ch)
+{
+    const te_font_metrics *m = font_metrics(r->font);
+    float s = c->scale > 0.0f ? c->scale : 1.0f;
+    float inset = 3.0f * s;
+    float bx = x + inset;
+    float by = inset;
+    float bw = tw - 2.0f * inset;
+    float bhh = bh - 2.0f * inset;
+    if (bw <= 2.0f || bhh <= 2.0f) {
+        return;
+    }
+    float lw = TE_MAX(1.0f, s);
+    push_rect(&r->bg, bx, by, bw, bhh, c->active_bg, 1.0f);
+    push_rect(&r->deco, bx, by, bw, lw, c->accent, 1.0f);
+    push_rect(&r->deco, bx, by + bhh - lw, bw, lw, c->accent, 1.0f);
+    push_rect(&r->deco, bx, by, lw, bhh, c->accent, 1.0f);
+    push_rect(&r->deco, bx + bw - lw, by, lw, bhh, c->accent, 1.0f);
+
+    uint32_t cps[TE_TAB_EDIT_CPS] = { 0 };
+    size_t n = title_cps(c->edit_text, cps, TE_ARRAY_LEN(cps));
+    /* Caret position in code points: decode the bytes before the cursor. */
+    char before[TE_TAB_EDIT_CPS * 4 + 1] = { 0 };
+    size_t blen = TE_MIN(c->edit_cursor, sizeof before - 1);
+    memcpy(before, c->edit_text, TE_MIN(blen, strlen(c->edit_text)));
+    uint32_t tmp[TE_TAB_EDIT_CPS] = { 0 };
+    size_t caret = title_cps(before, tmp, TE_ARRAY_LEN(tmp));
+    caret = TE_MIN(caret, n);
+
+    float fitf = (bw - cw) / cw;
+    size_t fit = fitf >= 1.0f ? (size_t)fitf : 1;
+    size_t start = caret >= fit ? caret - fit + 1 : 0;
+    float tx = bx + cw / 2.0f;
+    float ty = (bh - ch) / 2.0f;
+    if (c->edit_all && n > start) {
+        push_rect(&r->bg, tx, ty, (float)TE_MIN(n - start, fit) * cw, ch, c->accent, 0.35f);
+    }
+    for (size_t k = start; k < n && k - start < fit; k++) {
+        const glyph *g = get_glyph(r, cps[k], TE_FONT_REGULAR, false);
+        if (g != nullptr && g->present) {
+            push_glyph(&r->glyphs, g, tx + (float)(k - start) * cw + (float)g->left,
+                       ty + (float)m->baseline - (float)g->top, c->active_fg, 1.0f);
+        }
+    }
+    push_rect(&r->deco, tx + (float)(caret - start) * cw, ty, TE_MAX(1.0f, 2.0f * s), ch, c->accent, 1.0f);
+}
+
 void renderer_chrome(te_renderer *r, const te_chrome *c)
 {
     if (r == nullptr || c == nullptr) {
@@ -1283,7 +1345,13 @@ void renderer_chrome(te_renderer *r, const te_chrome *c)
         for (size_t i = 0; i < c->ntabs; i++) {
             bool active = i == c->active_tab;
             float x = ax + (float)i * tw;
-            if (active) {
+            bool dragged = c->dragging && i == c->drag_tab;
+            if (dragged) {
+                /* The tab being dragged stands out so its new place is easy to see. */
+                push_rect(&r->bg, x, 0.0f, tw, bh, c->active_bg, 1.0f);
+                push_rect(&r->deco, x, 0.0f, tw, bh, c->accent, 0.18f);
+                push_rect(&r->deco, x, bh - 2.0f, tw, 2.0f, c->accent, 1.0f);
+            } else if (active) {
                 push_rect(&r->bg, x, 0.0f, tw, bh, c->active_bg, 1.0f);
                 push_rect(&r->deco, x, bh - 2.0f, tw, 2.0f, c->accent, 1.0f);
             } else if (i > 0 && i - 1 != c->active_tab) {
@@ -1293,6 +1361,10 @@ void renderer_chrome(te_renderer *r, const te_chrome *c)
             if (c->tab_colors != nullptr && c->tab_colors[i] != 0) {
                 float sh = TE_MAX(3.0f, bh * 0.1f);
                 push_rect(&r->deco, x, 0.0f, tw, sh, c->tab_colors[i], 1.0f);
+            }
+            if (c->edit_text != nullptr && i == c->edit_tab) {
+                draw_tab_edit(r, c, x, tw, bh, cw, ch);
+                continue;
             }
             /* "N title", truncated with an ellipsis to fit. */
             uint32_t cps[160] = { 0 };
