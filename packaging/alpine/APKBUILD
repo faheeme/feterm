@@ -3,7 +3,7 @@
 # Built and signed by packaging/alpine/build-repo.sh for the FeTerm apk
 # repository (https://faheeme.gitlab.io/feterm-apk/), not for aports.
 pkgname=feterm
-pkgver=0.5.6
+pkgver=0.5.7
 pkgrel=0
 pkgdesc="Modern terminal emulator with PCRE2 syntax highlighting for Cisco, Arista and Juniper"
 url="https://faheeme.gitlab.io/feterm-site/"
@@ -53,5 +53,5 @@ package() {
 }
 
 sha512sums="
-06d69ddf55d5cfd44b9efb52baff5b706ccf501172f9785a188b8a4379f67638b407d5b0938f342aae8516209b0347d8d6bd1ef393cbfe696a275a7e14c6bb24  feterm-0.5.6.tar.gz
+e4d352645056ccba1ebf47f3ef2e9ffd68cad8b3dbc5fa3fa7cc7220093a8b39156670096108d7a8bd6b34f7545fad0b4815ad1d03657aa936dd91263e8f95e9  feterm-0.5.7.tar.gz
 "
