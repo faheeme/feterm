@@ -1,5 +1,5 @@
 Name:           feterm
-Version:        0.5.6
+Version:        0.5.7
 Release:        1%{?dist}
 Summary:        Modern terminal emulator with network-device syntax highlighting
 License:        MIT
@@ -46,6 +46,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.gitlab.faheeme.%{n
 %config(noreplace) %{_sysconfdir}/dnf/repos.override.d/50-feterm.repo
 
 %changelog
+* Thu Nov 19 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.7-1
+- Tab right-click menu, double-click rename and drag to reorder; anti-idle
+  sends a space and a backspace, fixing ^M on Arista EOS and FortiOS
+
 * Wed Nov 11 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.6-1
 - Files tab: Home and Follow terminal folder work over ssh; check the
   COPR repo for updates hourly (dnf5)
