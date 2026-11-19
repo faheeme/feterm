@@ -1,3 +1,11 @@
+feterm (0.5.7-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: tab right-click menu, double-click rename and
+    drag to reorder; anti-idle now sends a space and a backspace, which
+    fixes a literal ^M after idling on Arista EOS and FortiOS.
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Thu, 19 Nov 2026 14:43:19 +0200
+
 feterm (0.5.6-1~ppa1) resolute; urgency=medium
 
   * New upstream release: the Files tab's Home and Follow terminal folder
