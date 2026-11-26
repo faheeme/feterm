@@ -288,12 +288,21 @@ static const char *tab_label(const te_pane *p)
     return p->sess != nullptr ? p->sess->s.name : pane_title(p);
 }
 
+/* "FeTerm | <session name>", or the shell's own title for a plain local shell. --title wins as is. */
 static void update_window_title(app *a)
 {
     te_pane *p = focus_pane(a);
-    if (p != nullptr) {
-        plat_set_title(a->plat, a->cli.title != nullptr && term_title(p->term)[0] == '\0' ? a->cli.title : pane_title(p));
+    if (p == nullptr) {
+        plat_set_title(a->plat, APP_DISPLAY_NAME);
+        return;
     }
+    if (a->cli.title != nullptr && term_title(p->term)[0] == '\0') {
+        plat_set_title(a->plat, a->cli.title);
+        return;
+    }
+    char title[512] = { 0 };
+    tabbar_window_title(title, sizeof title, tab_label(p), p->exited || p->disconnected);
+    plat_set_title(a->plat, title);
 }
 
 /* The sidebar's place in the window for the current size and font. */
@@ -769,9 +778,11 @@ static void open_session(app *a, const te_session *s, const te_session_eff *eff,
     update_window_title(a);
 }
 
-static void host_sb_connect(void *user, const te_session *s, const te_session_eff *eff, bool split_pane)
+static void host_sb_connect(void *user, const te_session *s, const te_session_eff *eff, te_sb_open where)
 {
-    open_session(user, s, eff, split_pane ? OPEN_SPLIT_RIGHT : OPEN_TAB);
+    open_session(user, s, eff, where == TE_SB_OPEN_SPLIT_RIGHT ? OPEN_SPLIT_RIGHT
+                             : where == TE_SB_OPEN_SPLIT_DOWN  ? OPEN_SPLIT_DOWN
+                                                               : OPEN_TAB);
 }
 
 /*
@@ -825,6 +836,7 @@ static void reconnect_pane(app *a, te_pane *p)
         p->exited = true;
         p->reconnect_at_ms = 0;
         a->need_render = true;
+        update_window_title(a);
         return;
     }
     p->disconnected = false;
@@ -832,6 +844,7 @@ static void reconnect_pane(app *a, te_pane *p)
     p->started_ms = plat_ticks_ms();
     p->last_input_ms = p->started_ms;
     a->need_render = true;
+    update_window_title(a);
 }
 
 /* A session's connection ended with an error: offer (or schedule) a reconnect. */
@@ -1349,6 +1362,22 @@ static void update_opacity(app *a)
     a->need_render = true;
 }
 
+/* Windows: say so when [terminal] shell names a shell that is not installed. True if it did. */
+static bool warn_missing_shell(app *a)
+{
+#ifdef _WIN32
+    if (!pty_shell_found(a->cfg.shell)) {
+        char msg[160] = { 0 };
+        (void)str_fmt(msg, sizeof msg, "Shell '%.40s' not found: using PowerShell or cmd", a->cfg.shell);
+        show_toast(a, msg);
+        return true;
+    }
+#else
+    (void)a;
+#endif
+    return false;
+}
+
 static void reload_config(app *a)
 {
     te_config nc;
@@ -1395,7 +1424,9 @@ static void reload_config(app *a)
         sidebar_reload(&a->sb);
     }
     apply_size(a);
-    show_toast(a, "Configuration reloaded");
+    if (!warn_missing_shell(a)) {
+        show_toast(a, "Configuration reloaded");
+    }
 }
 
 static void theme_next(app *a)
@@ -2029,10 +2060,52 @@ static void open_close_tabs_question(app *a, size_t keep, bool right_only)
     a->need_render = true;
 }
 
+/*
+ * The window's close button, Cmd+Q or Alt+F4: quit straight away unless SSH,
+ * Telnet or serial sessions are still connected; then ask first. Local shells
+ * and ended sessions don't hold it up. A signal or OS shutdown never asks.
+ */
+static void request_quit(app *a, bool forced)
+{
+    const char *names[MAX_PANES] = { 0 };
+    size_t n = 0;
+    te_pane *all[MAX_PANES] = { 0 };
+    size_t np = layout_all_panes(&a->layout, all, TE_ARRAY_LEN(all));
+    for (size_t i = 0; i < np; i++) {
+        const te_pane *p = all[i];
+        if (p->sess != nullptr && p->sess->s.type != TE_SESS_LOCAL && !p->exited && !p->disconnected) {
+            names[n++] = p->sess->s.name;
+        }
+    }
+    if (forced || n == 0) {
+        a->running = false;
+        return;
+    }
+    if (a->tb.confirm.open) {
+        return;   /* already asking (the close button sends two requests) */
+    }
+    menu_close(&a->tb.menu);
+    tabbar_edit_end(&a->tb);
+    char ok[24] = { 0 };
+    (void)str_fmt(ok, sizeof ok, "Close %s", APP_DISPLAY_NAME);
+    form_init(&a->tb.confirm, TE_TB_CONFIRM_QUIT, ok, ok);
+    tabbar_quit_message(a->tb.confirm.message, sizeof a->tb.confirm.message, names, n);
+    a->tb.confirm.danger = true;
+    a->tb.confirm.focus = 1;   /* Cancel, the safe default */
+    te_painter p = ui_painter(a);
+    form_layout(&a->tb.confirm, &p, (float)a->width, (float)a->height);
+    a->need_render = true;
+}
+
 static void tab_confirm_result(app *a, te_form_result r)
 {
     if (r != TE_FORM_SUBMIT) {
         return;   /* Cancel and Esc close the dialog themselves */
+    }
+    if (a->tb.confirm.purpose == TE_TB_CONFIRM_QUIT) {
+        a->tb.confirm.open = false;
+        a->running = false;
+        return;
     }
     bool right_only = a->tb.confirm.purpose == TE_TB_CONFIRM_RIGHT;
     size_t keep = a->tb.confirm_tab;
@@ -2548,7 +2621,7 @@ static void on_focus(app *a, bool focused)
 static void handle_event(app *a, const te_event *ev)
 {
     switch (ev->type) {
-    case TE_EV_QUIT:         a->running = false; break;
+    case TE_EV_QUIT:         request_quit(a, ev->quit.forced); break;
     case TE_EV_RESIZE:       apply_size(a); break;
     case TE_EV_SCALE: {
         float s = plat_content_scale(a->plat);
@@ -2639,9 +2712,12 @@ static void service_panes(app *a)
                 plat_fd_rearm(a->plat, p->tag);
             } else if (p->sess != nullptr && p->status != 0 && a->cfg.reconnect != TE_RECONNECT_NEVER) {
                 on_disconnect(a, p);   /* a session dropped: keep the pane and offer to reconnect */
+                update_window_title(a);
             } else if (!a->cli.hold) {
                 close_pane(a, p);   /* the shell exited (or the user logged out): its pane goes away */
                 continue;
+            } else {
+                update_window_title(a);   /* --hold keeps the pane: mark it disconnected */
             }
             a->need_render = true;
         }
@@ -3135,6 +3211,7 @@ int main(int argc, char **argv)
     if (a.cli.exec_argv == nullptr) {
         show_banner(&a, first);   /* sized already; not before a -e command's own output */
     }
+    (void)warn_missing_shell(&a);
     run(&a);
     /* `-e cmd` passes the command's exit status on. */
     exit_code = a.exit_status;

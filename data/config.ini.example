@@ -72,8 +72,12 @@ follow_terminal = true
 editor =
 
 [terminal]
-; Empty: $SHELL, then /etc/passwd, then /bin/sh
+; Empty: $SHELL, then /etc/passwd, then /bin/sh.
+; Windows: empty or auto (PowerShell 7, else Windows PowerShell, else cmd), pwsh,
+; powershell, cmd, gitbash, wsl, wsl:<distribution>, msys2, cygwin, nu, or a full path
 shell =
+; Windows: arguments for a shell given as a full path ("double quotes" group words)
+shell_args =
 term = xterm-256color
 ; Lines, 0..1000000
 scrollback = 10000

@@ -24,10 +24,13 @@
 
 typedef enum { TE_SB_SESSIONS, TE_SB_FILES } te_sb_tab;
 
+/* Where the sidebar opens a session. */
+typedef enum { TE_SB_OPEN_TAB, TE_SB_OPEN_SPLIT_RIGHT, TE_SB_OPEN_SPLIT_DOWN } te_sb_open;
+
 typedef struct te_sidebar_host {
     void *user;
-    /* Open a session in a new tab, or split the current pane. */
-    void (*connect)(void *user, const te_session *s, const te_session_eff *eff, bool split);
+    /* Open a session in a new tab, or split the current pane right or down. */
+    void (*connect)(void *user, const te_session *s, const te_session_eff *eff, te_sb_open where);
     void (*toast)(void *user, const char *msg);
     void (*copy)(void *user, const char *text);
 } te_sidebar_host;

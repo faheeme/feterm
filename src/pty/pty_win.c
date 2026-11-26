@@ -22,6 +22,7 @@
 #include "util/os.h"
 #include "util/str.h"
 #include "util/winargs.h"
+#include "util/winshell.h"
 
 #define OUT_CAP      (1u << 20)   /* output buffered before the reader waits for the UI */
 
@@ -58,64 +59,263 @@ void *pty_ready_handle(const te_pty *p)
 /* ------------------------------------------------------------------------- */
 /* Command line and environment */
 
+/* exe's full path from PATH only, never the current directory (a planted copy
+ * there could shadow the real one). Heap UTF-8, or nullptr. */
+static char *search_path_exe(const wchar_t *exe)
+{
+    char *res = nullptr;
+    DWORD plen = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    if (plen <= 1) {
+        return nullptr;
+    }
+    wchar_t *path = te_calloc(plen, sizeof *path);
+    if (path != nullptr && GetEnvironmentVariableW(L"PATH", path, plen) == plen - 1) {
+        wchar_t found[MAX_PATH] = { 0 };
+        DWORD n = SearchPathW(path, exe, nullptr, MAX_PATH, found, nullptr);
+        if (n > 0 && n < MAX_PATH) {
+            res = te_w_narrow(found);
+        }
+    }
+    TE_FREE(path);
+    return res;
+}
+
+/* base\rel if that file exists. base: an environment variable's value (L"ProgramFiles"),
+ * or nullptr for the System32 folder. Heap UTF-8, or nullptr. */
+static char *existing_under(const wchar_t *base_var, const wchar_t *rel)
+{
+    wchar_t base[MAX_PATH] = { 0 };
+    if (base_var == nullptr) {
+        UINT s = GetSystemDirectoryW(base, MAX_PATH);
+        if (s == 0 || s >= MAX_PATH) {
+            return nullptr;
+        }
+    } else {
+        DWORD s = GetEnvironmentVariableW(base_var, base, MAX_PATH);
+        if (s == 0 || s >= MAX_PATH) {
+            return nullptr;
+        }
+    }
+    wchar_t full[MAX_PATH] = { 0 };
+    int n = _snwprintf(full, MAX_PATH, L"%ls\\%ls", base, rel);
+    if (n <= 0 || n >= MAX_PATH) {
+        return nullptr;
+    }
+    DWORD at = GetFileAttributesW(full);
+    return at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_DIRECTORY) == 0 ? te_w_narrow(full) : nullptr;
+}
+
+/* Git for Windows' bin\bash.exe: next to the git.exe on PATH (Git\cmd or Git\mingw64\bin), else the usual folders. */
+static char *find_git_bash(void)
+{
+    char *git = search_path_exe(L"git.exe");
+    if (git != nullptr) {
+        static const char *const ups[] = { "\\..\\bin\\bash.exe", "\\..\\..\\bin\\bash.exe" };
+        char *slash = strrchr(git, '\\');
+        if (slash != nullptr) {
+            *slash = '\0';
+            for (size_t i = 0; i < TE_ARRAY_LEN(ups); i++) {
+                char cand[MAX_PATH * 3] = { 0 };
+                wchar_t *w = nullptr;
+                if (str_fmt(cand, sizeof cand, "%s%s", git, ups[i]) == TE_OK && (w = te_w_widen(cand)) != nullptr) {
+                    wchar_t full[MAX_PATH] = { 0 };
+                    DWORD n = GetFullPathNameW(w, MAX_PATH, full, nullptr);
+                    DWORD at = n > 0 && n < MAX_PATH ? GetFileAttributesW(full) : INVALID_FILE_ATTRIBUTES;
+                    TE_FREE(w);
+                    if (at != INVALID_FILE_ATTRIBUTES && (at & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+                        TE_FREE(git);
+                        return te_w_narrow(full);
+                    }
+                }
+            }
+        }
+        TE_FREE(git);
+    }
+    char *b = existing_under(L"ProgramFiles", L"Git\\bin\\bash.exe");
+    return b != nullptr ? b : existing_under(L"LOCALAPPDATA", L"Programs\\Git\\bin\\bash.exe");
+}
+
 /* pwsh if installed, else Windows PowerShell; nullptr means cmd. Heap UTF-8 path. */
 static char *find_powershell(void)
 {
-    wchar_t found[MAX_PATH] = { 0 };
-    /* Resolve against PATH only. Passing nullptr would let SearchPathW search the
-     * current directory, where a planted pwsh.exe could shadow the real one. */
-    DWORD plen = GetEnvironmentVariableW(L"PATH", nullptr, 0);
-    if (plen > 1) {
-        wchar_t *path = te_calloc(plen, sizeof *path);
-        if (path != nullptr && GetEnvironmentVariableW(L"PATH", path, plen) == plen - 1) {
-            DWORD n = SearchPathW(path, L"pwsh.exe", nullptr, MAX_PATH, found, nullptr);
-            if (n > 0 && n < MAX_PATH) {
-                TE_FREE(path);
-                return te_w_narrow(found);
-            }
-        }
-        TE_FREE(path);
+    char *ps = search_path_exe(L"pwsh.exe");
+    if (ps == nullptr) {
+        ps = existing_under(L"ProgramFiles", L"PowerShell\\7\\pwsh.exe");
     }
-    wchar_t sys[MAX_PATH] = { 0 };
-    UINT s = GetSystemDirectoryW(sys, MAX_PATH);
-    if (s == 0 || s >= MAX_PATH ||
-        _snwprintf(found, MAX_PATH, L"%ls\\WindowsPowerShell\\v1.0\\powershell.exe", sys) <= 0) {
-        return nullptr;
-    }
-    found[MAX_PATH - 1] = L'\0';
-    return GetFileAttributesW(found) != INVALID_FILE_ATTRIBUTES ? te_w_narrow(found) : nullptr;
+    return ps != nullptr ? ps : existing_under(nullptr, L"WindowsPowerShell\\v1.0\\powershell.exe");
 }
 
-/* The command line: argv, else the configured shell, else PowerShell or cmd. */
-static te_err build_cmdline(const te_pty_opts *o, wchar_t **out)
+/* cmd: %ComSpec%, else System32\cmd.exe. Heap UTF-8 path. */
+static char *find_cmd(void)
 {
+    const char *comspec = getenv("ComSpec");
+    if (comspec != nullptr && comspec[0] != '\0') {
+        return str_dup(comspec);
+    }
+    char *c = existing_under(nullptr, L"cmd.exe");
+    return c != nullptr ? c : str_dup("cmd.exe");
+}
+
+/* The default shell to start: a program, its arguments and extra environment. */
+typedef struct win_shell {
+    char        *exe;                   /* heap */
+    const char  *args[TE_WSH_MAX_ARGS + 2];
+    size_t       nargs;
+    const char  *env[2];                /* "NAME=value" literals, may be nullptr */
+    char         distro[TE_WSH_DISTRO_MAX];
+    te_wsh_args  user;                  /* shell_args, for a shell given as a path */
+} win_shell;
+
+/* Find the program for a preset. False when it is not installed (exe stays nullptr). */
+static bool resolve_preset(te_wsh_kind k, win_shell *w)
+{
+    switch (k) {
+    case TE_WSH_AUTO:
+        w->exe = find_powershell();
+        if (w->exe != nullptr) {
+            w->args[w->nargs++] = "-NoLogo";
+        } else {
+            w->exe = find_cmd();
+        }
+        return w->exe != nullptr;
+    case TE_WSH_PWSH:
+        w->exe = search_path_exe(L"pwsh.exe");
+        if (w->exe == nullptr) {
+            w->exe = existing_under(L"ProgramFiles", L"PowerShell\\7\\pwsh.exe");
+        }
+        w->args[w->nargs++] = "-NoLogo";
+        break;
+    case TE_WSH_POWERSHELL:
+        w->exe = existing_under(nullptr, L"WindowsPowerShell\\v1.0\\powershell.exe");
+        w->args[w->nargs++] = "-NoLogo";
+        break;
+    case TE_WSH_CMD:
+        w->exe = find_cmd();
+        break;
+    case TE_WSH_GITBASH:
+        w->exe = find_git_bash();
+        w->args[w->nargs++] = "--login";
+        w->args[w->nargs++] = "-i";
+        w->env[0] = "CHERE_INVOKING=1";   /* start in the pane's folder, not $HOME */
+        break;
+    case TE_WSH_WSL:
+        w->exe = existing_under(nullptr, L"wsl.exe");
+        if (w->distro[0] != '\0') {
+            w->args[w->nargs++] = "-d";
+            w->args[w->nargs++] = w->distro;
+        }
+        break;
+    case TE_WSH_MSYS2:
+        w->exe = existing_under(L"SystemDrive", L"msys64\\usr\\bin\\bash.exe");
+        w->args[w->nargs++] = "--login";
+        w->args[w->nargs++] = "-i";
+        w->env[0] = "MSYSTEM=UCRT64";
+        w->env[1] = "CHERE_INVOKING=1";
+        break;
+    case TE_WSH_CYGWIN:
+        w->exe = existing_under(L"SystemDrive", L"cygwin64\\bin\\bash.exe");
+        w->args[w->nargs++] = "--login";
+        w->args[w->nargs++] = "-i";
+        w->env[0] = "CHERE_INVOKING=1";
+        break;
+    case TE_WSH_NU:
+        w->exe = search_path_exe(L"nu.exe");
+        if (w->exe == nullptr) {
+            w->exe = existing_under(L"ProgramFiles", L"nu\\bin\\nu.exe");
+        }
+        break;
+    case TE_WSH_PATH:
+    case TE_WSH_INVALID:
+        return false;
+    }
+    return w->exe != nullptr;
+}
+
+/* The configured shell, falling back to auto when a preset is not installed. */
+static te_err resolve_shell(const char *shell, const char *shell_args, win_shell *w)
+{
+    memset(w, 0, sizeof *w);
+    te_wsh_kind k = winshell_parse(shell, w->distro, sizeof w->distro);
+    if (k == TE_WSH_PATH) {
+        w->exe = str_dup(shell);
+        if (w->exe == nullptr) {
+            return TE_ERR_NOMEM;
+        }
+        if (winshell_split_args(shell_args, &w->user) != TE_OK) {
+            LOG_W("ignoring shell_args: unbalanced quote or too many words");
+            w->user.argc = 0;
+        }
+        for (size_t i = 0; i < w->user.argc && w->nargs < TE_WSH_MAX_ARGS; i++) {
+            w->args[w->nargs++] = w->user.argv[i];
+        }
+        return TE_OK;
+    }
+    if (resolve_preset(k, w)) {
+        return TE_OK;
+    }
+    if (k != TE_WSH_AUTO) {
+        LOG_W("shell '%s' is not installed; using the default", shell);
+    }
+    TE_FREE(w->exe);
+    memset(w, 0, sizeof *w);
+    return resolve_preset(TE_WSH_AUTO, w) ? TE_OK : TE_ERR_NOTFOUND;
+}
+
+bool pty_shell_found(const char *shell)
+{
+    win_shell w;
+    char distro[TE_WSH_DISTRO_MAX] = { 0 };
+    te_wsh_kind k = winshell_parse(shell, distro, sizeof distro);
+    if (k == TE_WSH_AUTO || k == TE_WSH_PATH) {
+        return true;   /* a path is reported by CreateProcess when the pane starts */
+    }
+    memset(&w, 0, sizeof w);
+    bool ok = k != TE_WSH_INVALID && resolve_preset(k, &w);
+    TE_FREE(w.exe);
+    return ok;
+}
+
+/* The command line: argv, else the configured shell. env gets the shell's extra variables. */
+static te_err build_cmdline(const te_pty_opts *o, wchar_t **out, const char *env[2])
+{
+    env[0] = nullptr;
+    env[1] = nullptr;
     if (o->argv != nullptr && o->argv[0] != nullptr) {
         return win_cmdline(o->argv, out);
     }
-    if (o->shell != nullptr && o->shell[0] != '\0') {
-        const char *argv[] = { o->shell, nullptr };
-        return win_cmdline(argv, out);
-    }
-    char *ps = find_powershell();
-    if (ps != nullptr) {
-        const char *argv[] = { ps, "-NoLogo", nullptr };
-        te_err rc = win_cmdline(argv, out);
-        TE_FREE(ps);
+    win_shell w;
+    te_err rc = resolve_shell(o->shell, o->shell_args, &w);
+    if (rc != TE_OK) {
         return rc;
     }
-    const char *comspec = getenv("ComSpec");
-    const char *argv[] = { comspec != nullptr && comspec[0] != '\0' ? comspec : "cmd.exe", nullptr };
-    return win_cmdline(argv, out);
+    const char *argv[TE_WSH_MAX_ARGS + 4] = { 0 };
+    size_t n = 0;
+    argv[n++] = w.exe;
+    for (size_t i = 0; i < w.nargs && n + 1 < TE_ARRAY_LEN(argv); i++) {
+        argv[n++] = w.args[i];
+    }
+    argv[n] = nullptr;
+    rc = win_cmdline(argv, out);
+    env[0] = w.env[0];
+    env[1] = w.env[1];
+    TE_FREE(w.exe);
+    return rc;
 }
 
-/* Variables we set ourselves; inherited copies are dropped. */
-static bool env_is_overridden(const wchar_t *kv)
+/* Variables we set ourselves (the fixed ones, plus extra[0..nextra)); inherited copies are dropped. */
+static bool env_is_overridden(const wchar_t *kv, wchar_t *const *extra, size_t nextra)
 {
     static const wchar_t *const names[] = {
         L"TERM=", L"COLORTERM=", L"TERM_PROGRAM=", L"TERM_PROGRAM_VERSION=", L"TERMINFO=",
     };
     for (size_t i = 0; i < TE_ARRAY_LEN(names); i++) {
         if (_wcsnicmp(kv, names[i], wcslen(names[i])) == 0) {
+            return true;
+        }
+    }
+    for (size_t i = 0; i < nextra; i++) {
+        const wchar_t *eq = extra[i] != nullptr ? wcschr(extra[i], L'=') : nullptr;
+        if (eq != nullptr && _wcsnicmp(kv, extra[i], (size_t)(eq - extra[i]) + 1) == 0) {
             return true;
         }
     }
@@ -129,29 +329,36 @@ static int env_cmp(const void *a, const void *b)
     return _wcsicmp(*x, *y);
 }
 
-/* The inherited environment plus ours, sorted as CreateProcess expects. Heap block, or nullptr. */
-static wchar_t *build_env(const char *term)
+/* The inherited environment plus ours and the shell's (shell_env, may hold nullptrs),
+ * sorted as CreateProcess expects. Heap block, or nullptr. */
+static wchar_t *build_env(const char *term, const char *const shell_env[2])
 {
     char tval[256] = { 0 };
     if (str_fmt(tval, sizeof tval, "TERM=%s", term != nullptr && term[0] != '\0' ? term : "xterm-256color") != TE_OK) {
         return nullptr;
     }
-    const char *extra_u8[4] = { tval, "COLORTERM=truecolor", "TERM_PROGRAM=" APP_DISPLAY_NAME,
-                                "TERM_PROGRAM_VERSION=" APP_VERSION };
-    wchar_t *extra[4] = { nullptr, nullptr, nullptr, nullptr };
+    const char *extra_u8[6] = { tval, "COLORTERM=truecolor", "TERM_PROGRAM=" APP_DISPLAY_NAME,
+                                "TERM_PROGRAM_VERSION=" APP_VERSION, shell_env[0], shell_env[1] };
+    wchar_t *extra[6] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+    size_t nextra = 4;
+    for (size_t i = 4; i < TE_ARRAY_LEN(extra_u8); i++) {
+        if (extra_u8[i] != nullptr) {
+            extra_u8[nextra++] = extra_u8[i];   /* pack the shell's variables after ours */
+        }
+    }
     wchar_t *block = nullptr;
     const wchar_t **list = nullptr;
     wchar_t *inherited = GetEnvironmentStringsW();
     if (inherited == nullptr) {
         return nullptr;
     }
-    for (size_t i = 0; i < TE_ARRAY_LEN(extra); i++) {
+    for (size_t i = 0; i < nextra; i++) {
         extra[i] = te_w_widen(extra_u8[i]);
         if (extra[i] == nullptr) {
             goto out;
         }
     }
-    size_t count = TE_ARRAY_LEN(extra);
+    size_t count = nextra;
     for (const wchar_t *e = inherited; *e != L'\0'; e += wcslen(e) + 1) {
         count++;
     }
@@ -162,12 +369,12 @@ static wchar_t *build_env(const char *term)
     size_t k = 0;
     size_t total = 1;   /* the block's final terminator */
     for (const wchar_t *e = inherited; *e != L'\0' && k < count; e += wcslen(e) + 1) {
-        if (!env_is_overridden(e)) {
+        if (!env_is_overridden(e, extra + 4, nextra - 4)) {
             list[k++] = e;
             total += wcslen(e) + 1;
         }
     }
-    for (size_t i = 0; i < TE_ARRAY_LEN(extra) && k < count; i++) {
+    for (size_t i = 0; i < nextra && k < count; i++) {
         list[k++] = extra[i];
         total += wcslen(extra[i]) + 1;
     }
@@ -309,12 +516,13 @@ te_err pty_spawn(te_pty *p, const te_pty_opts *o)
         goto fail;
     }
 
-    rc = build_cmdline(o, &wcmd);
+    const char *shell_env[2] = { nullptr, nullptr };
+    rc = build_cmdline(o, &wcmd, shell_env);
     if (rc != TE_OK) {
         goto fail;
     }
     rc = TE_ERR_SYS;
-    env = build_env(o->term);
+    env = build_env(o->term, shell_env);
     if (env == nullptr) {
         rc = TE_ERR_NOMEM;
         goto fail;

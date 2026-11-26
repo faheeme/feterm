@@ -3,6 +3,7 @@
 
 #ifndef _WIN32
 #include <dlfcn.h>
+#include <signal.h>
 #endif
 #include <string.h>
 
@@ -16,6 +17,42 @@
 #include "util/str.h"
 
 #define TE_ICON_MAX 512   /* largest embedded icon side we accept */
+
+#ifndef _WIN32
+/*
+ * SDL turns SIGINT and SIGTERM into the same quit event as the window's close
+ * button. A signal must not wait on a "sessions are open" question (a logout
+ * sends SIGTERM), so note that one arrived and pass it on to SDL's handler.
+ */
+static volatile sig_atomic_t g_quit_signalled;
+static struct sigaction g_old_int, g_old_term;
+
+static void on_quit_signal(int sig)
+{
+    g_quit_signalled = 1;
+    const struct sigaction *old = sig == SIGINT ? &g_old_int : &g_old_term;
+    if ((old->sa_flags & SA_SIGINFO) == 0 && old->sa_handler != SIG_DFL && old->sa_handler != SIG_IGN) {
+        old->sa_handler(sig);
+    } else if ((old->sa_flags & SA_SIGINFO) == 0 && old->sa_handler == SIG_DFL) {
+        (void)signal(sig, SIG_DFL);   /* SDL left it alone: die the usual way */
+        (void)raise(sig);
+    }
+}
+
+static void watch_quit_signals(void)
+{
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = on_quit_signal;
+    (void)sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGINT, nullptr, &g_old_int) == 0 && (g_old_int.sa_flags & SA_SIGINFO) == 0) {
+        (void)sigaction(SIGINT, &sa, nullptr);
+    }
+    if (sigaction(SIGTERM, nullptr, &g_old_term) == 0 && (g_old_term.sa_flags & SA_SIGINFO) == 0) {
+        (void)sigaction(SIGTERM, &sa, nullptr);
+    }
+}
+#endif
 
 #ifdef __APPLE__
 bool plat_macos_free_close_key(void);   /* menu_mac.c */
@@ -296,6 +333,9 @@ te_err plat_create(te_platform **out, const te_platform_opts *o)
         return TE_ERR_PLATFORM;
     }
     LOG_D("video driver: %s", SDL_GetCurrentVideoDriver());
+#ifndef _WIN32
+    watch_quit_signals();   /* after SDL_Init, which installs its own */
+#endif
 
 #ifdef __APPLE__
     /* No OpenGL ES on macOS: the native 4.1 core profile (see render/gl.h). */
@@ -428,6 +468,13 @@ static bool translate(te_platform *p, const SDL_Event *e, te_event *ev)
     case SDL_EVENT_QUIT:
     case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
         ev->type = TE_EV_QUIT;
+#ifndef _WIN32
+        ev->quit.forced = g_quit_signalled != 0;
+#endif
+        return true;
+    case SDL_EVENT_TERMINATING:   /* the OS is ending the app (shutdown): no questions */
+        ev->type = TE_EV_QUIT;
+        ev->quit.forced = true;
         return true;
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
         ev->type = TE_EV_RESIZE;

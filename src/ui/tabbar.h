@@ -31,7 +31,7 @@ enum {
 };
 
 /* Confirmation dialog purposes. */
-enum { TE_TB_CONFIRM_OTHERS = 1, TE_TB_CONFIRM_RIGHT };
+enum { TE_TB_CONFIRM_OTHERS = 1, TE_TB_CONFIRM_RIGHT, TE_TB_CONFIRM_QUIT };
 
 /* What the menu needs to know about the tab it opens on. */
 typedef struct te_tabbar_menu_ctx {
@@ -87,5 +87,18 @@ void tabbar_reset(te_tabbar_ui *ui);
  * the pointer has not left the tab's own slot.
  */
 size_t tabbar_drag_slot(size_t from, float x, float area_x, float tw, size_t ntabs);
+
+/*
+ * The window title: "FeTerm | name", plus " (disconnected)" once the pane's
+ * program has exited. A long name is cut on a character boundary. No name (or
+ * an empty one) gives just "FeTerm".
+ */
+void tabbar_window_title(char *out, size_t outsz, const char *name, bool exited);
+
+/*
+ * The "close FeTerm?" question for the n sessions still open (n > 0), naming
+ * the first few: "2 sessions are still open (core1, fw2). Close FeTerm and end them?"
+ */
+void tabbar_quit_message(char *out, size_t outsz, const char *const *names, size_t n);
 
 #endif

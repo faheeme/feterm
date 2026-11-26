@@ -30,7 +30,8 @@ typedef struct te_config {
     te_tabbar_mode  tab_bar;          /* auto: shown when there is more than one tab */
     float           inactive_dim;     /* 0..0.8: darken panes without focus */
     /* [terminal] */
-    char            shell[1024];      /* empty: $SHELL, then /etc/passwd, then /bin/sh */
+    char            shell[1024];      /* empty: $SHELL, then /etc/passwd, then /bin/sh; Windows: also a preset (util/winshell.h) */
+    char            shell_args[1024]; /* Windows: arguments for a shell given as a path */
     char            term[64];
     uint32_t        scrollback;       /* lines */
     bool            bold_is_bright;
