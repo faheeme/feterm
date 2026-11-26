@@ -5,6 +5,7 @@
 #include "config/ini.h"
 #include "config/paths.h"
 #include "util/log.h"
+#include "util/winshell.h"
 #include "util/str.h"
 
 void config_defaults(te_config *c)
@@ -133,7 +134,23 @@ static te_err config_kv(void *user, const char *sec, const char *key, const char
         }
     } else if (strcmp(sec, "terminal") == 0) {
         if (strcmp(key, "shell") == 0) {
+#ifdef _WIN32
+            char distro[TE_WSH_DISTRO_MAX] = { 0 };
+            if (winshell_parse(value, distro, sizeof distro) == TE_WSH_INVALID) {
+                BAD("shell (wsl:<distribution> takes letters, digits, '.', '_' and '-')");
+            } else {
+                set_str(c->shell, sizeof c->shell, value, path, line);
+            }
+#else
             set_str(c->shell, sizeof c->shell, value, path, line);
+#endif
+        } else if (strcmp(key, "shell_args") == 0) {
+            te_wsh_args wa;
+            if (winshell_split_args(value, &wa) == TE_OK) {
+                set_str(c->shell_args, sizeof c->shell_args, value, path, line);
+            } else {
+                BAD("shell_args (unbalanced quote, or more than 16 words)");
+            }
         } else if (strcmp(key, "term") == 0) {
             if (paths_is_safe_name(value)) {
                 set_str(c->term, sizeof c->term, value, path, line);

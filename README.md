@@ -117,6 +117,24 @@ SSH sessions and the Files tab use the OpenSSH client that comes with Windows. I
 says "not recognized", add it under **Settings → System → Optional features → OpenSSH
 Client**. Telnet and serial sessions need nothing extra.
 
+New tabs start PowerShell 7 (`pwsh`) if it is installed, else Windows PowerShell, else cmd.
+To pick another shell, set `shell` under `[terminal]` in `%APPDATA%\FeTerm\config.ini`:
+
+| `shell =` | starts |
+|---|---|
+| `auto` (or empty) | PowerShell 7, else Windows PowerShell 5.1, else cmd |
+| `pwsh` | PowerShell 7 |
+| `powershell` | Windows PowerShell 5.1 |
+| `cmd` | Command Prompt |
+| `gitbash` | Git Bash (Git for Windows) |
+| `wsl` or `wsl:Ubuntu` | WSL: the default distribution, or the one named |
+| `msys2` | MSYS2 bash (UCRT64) from `C:\msys64` |
+| `cygwin` | Cygwin bash from `C:\cygwin64` |
+| `nu` | Nushell |
+| a full path | that program; give it arguments with `shell_args =` (use "double quotes" for spaces) |
+
+If the shell isn't installed, FeTerm says so and starts the default one.
+
 Differences from Linux:
 - **The Files tab and cloned sessions ask for the password again.** Windows' OpenSSH can't
   share one login between connections (no ControlMaster), so the Files tab and each clone
@@ -280,6 +298,11 @@ Move left / right; and Close tab, Close other tabs and Close tabs to the right (
 two ask first). A renamed tab keeps its name until you reset it or clear the name.
 `rename_tab`, `move_tab_left` and `move_tab_right` can be bound in `[keys]`.
 
+The window title is `FeTerm | <name>`: the focused pane's session name, or for a plain local
+shell the title the shell sets (` (disconnected)` is added once a session drops). Closing the
+window (or Cmd+Q, Alt+F4) asks first while SSH, Telnet or serial sessions are still connected;
+local shells and ended sessions don't hold it up.
+
 New local shells start with a small banner: the FeTerm logo, the version and the author.
 Turn it off with `[terminal] banner = false`. The name, author and email come from the
 Makefile (`DISPLAY_NAME`, `AUTHOR`, `EMAIL`).
@@ -313,7 +336,7 @@ or press Ctrl+Shift+B to collapse it to a thin strip.
   first). Folders have New session here, New folder here, Folder settings, Rename and
   Delete. Drag a session onto a folder to move it.
 - **Keyboard:** type in the filter box to find sessions by name, host or folder. Up/Down
-  select, Enter connects (Shift+Enter in a split), Left/Right close and open folders, F2
+  select, Enter connects (Shift+Enter in a split to the right; the right-click menu also splits down), Left/Right close and open folders, F2
   renames, Delete deletes (after asking) and Shift+F10 opens the menu.
 - **Folder settings:** a folder's colour, vendor logo, default user and anti-idle setting
   apply to everything inside it unless a session sets its own. A session's colour shows as

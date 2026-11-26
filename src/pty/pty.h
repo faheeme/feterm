@@ -14,6 +14,8 @@ typedef struct te_pty {
 } te_pty;
 /* Event that is set while output is waiting (for plat_watch_handle). */
 void *pty_ready_handle(const te_pty *p);
+/* False when shell names a preset (gitbash, msys2, ...) that is not installed; new panes then use auto. */
+bool pty_shell_found(const char *shell);
 #else
 typedef struct te_pty {
     int   master_fd;   /* -1 when closed */
@@ -24,6 +26,7 @@ typedef struct te_pty {
 typedef struct te_pty_opts {
     const char  *const *argv;  /* nullptr: run the user's login shell */
     const char  *shell;        /* overrides $SHELL when argv is nullptr; may be nullptr/empty */
+    const char  *shell_args;   /* Windows: arguments for a shell path; may be nullptr */
     const char  *cwd;          /* may be nullptr */
     const char  *term;         /* TERM value for the child */
     uint16_t     cols, rows;

@@ -69,6 +69,7 @@ te_err pane_create(te_pane **out, const te_pane_spawn *sp)
     te_pty_opts po = {
         .argv = sp->argv,
         .shell = sp->cfg->shell,
+        .shell_args = sp->cfg->shell_args,
         .cwd = sp->cwd,
         .term = sp->cfg->term,
         .cols = sp->cols,
@@ -102,6 +103,7 @@ te_err pane_respawn(te_pane *p, const te_config *cfg, const char *const *argv, c
     te_pty_opts po = {
         .argv = argv,
         .shell = cfg->shell,
+        .shell_args = cfg->shell_args,
         .cwd = cwd,
         .term = cfg->term,
         .cols = term_cols(p->term),

@@ -23,6 +23,7 @@
 #include "ui/url.h"
 #include "ui/linetext.h"
 #include "ui/tabbar.h"
+#include "util/winshell.h"
 #include "config/theme.h"
 #include "input/keys.h"
 #include "util/mem.h"
@@ -1511,6 +1512,86 @@ static int menu_find(const te_menu_item *it, size_t n, int id)
     return -1;
 }
 
+/* Windows [terminal] shell presets and shell_args. */
+static void test_winshell(void)
+{
+    char d[TE_WSH_DISTRO_MAX] = { 0 };
+    CHECK(winshell_parse("", d, sizeof d) == TE_WSH_AUTO && winshell_parse(nullptr, d, sizeof d) == TE_WSH_AUTO);
+    CHECK(winshell_parse("auto", d, sizeof d) == TE_WSH_AUTO);
+    CHECK(winshell_parse("pwsh", d, sizeof d) == TE_WSH_PWSH);
+    CHECK(winshell_parse("powershell", d, sizeof d) == TE_WSH_POWERSHELL);
+    CHECK(winshell_parse("cmd", d, sizeof d) == TE_WSH_CMD);
+    CHECK(winshell_parse("gitbash", d, sizeof d) == TE_WSH_GITBASH);
+    CHECK(winshell_parse("msys2", d, sizeof d) == TE_WSH_MSYS2);
+    CHECK(winshell_parse("cygwin", d, sizeof d) == TE_WSH_CYGWIN);
+    CHECK(winshell_parse("nu", d, sizeof d) == TE_WSH_NU);
+    CHECK(winshell_parse("wsl", d, sizeof d) == TE_WSH_WSL && d[0] == '\0');
+    CHECK(winshell_parse("wsl:Ubuntu-24.04", d, sizeof d) == TE_WSH_WSL && strcmp(d, "Ubuntu-24.04") == 0);
+    CHECK(winshell_parse("wsl:", d, sizeof d) == TE_WSH_INVALID && d[0] == '\0');
+    CHECK(winshell_parse("wsl:-e calc", d, sizeof d) == TE_WSH_INVALID);   /* no wsl.exe options */
+    CHECK(winshell_parse("wsl:a b", d, sizeof d) == TE_WSH_INVALID);
+    CHECK(winshell_parse("wsl:a&calc", d, sizeof d) == TE_WSH_INVALID);
+    CHECK(winshell_parse("PWSH", d, sizeof d) == TE_WSH_PATH);   /* presets are lower case */
+    CHECK(winshell_parse("C:\\Tools\\xonsh.exe", d, sizeof d) == TE_WSH_PATH);
+    CHECK(strcmp(winshell_name(TE_WSH_GITBASH), "gitbash") == 0 && winshell_name(TE_WSH_PATH)[0] == '\0');
+
+    te_wsh_args a;
+    CHECK(winshell_split_args(nullptr, &a) == TE_OK && a.argc == 0);
+    CHECK(winshell_split_args("   ", &a) == TE_OK && a.argc == 0);
+    CHECK(winshell_split_args(" -NoExit  -Command \"Import-Module 'C:\\x y\\a.psm1'\" ", &a) == TE_OK && a.argc == 3);
+    CHECK(strcmp(a.argv[0], "-NoExit") == 0 && strcmp(a.argv[2], "Import-Module 'C:\\x y\\a.psm1'") == 0);
+    CHECK(winshell_split_args("a\"b c\"d", &a) == TE_OK && a.argc == 1 && strcmp(a.argv[0], "ab cd") == 0);
+    CHECK(winshell_split_args("\"\"", &a) == TE_OK && a.argc == 1 && a.argv[0][0] == '\0');   /* an empty word */
+    CHECK(winshell_split_args("\"open", &a) == TE_ERR_INVAL);
+    CHECK(winshell_split_args("1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16", &a) == TE_OK && a.argc == 16);
+    CHECK(winshell_split_args("1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17", &a) == TE_ERR_RANGE);
+    char big[1100];
+    memset(big, 'x', sizeof big - 1);
+    big[sizeof big - 1] = '\0';
+    CHECK(winshell_split_args(big, &a) == TE_ERR_RANGE);
+}
+
+/* The window title and the "close FeTerm?" question. */
+static void test_window_title(void)
+{
+    char t[512] = { 0 };
+    tabbar_window_title(t, sizeof t, "core-sw1", false);
+    CHECK(strcmp(t, APP_DISPLAY_NAME " | core-sw1") == 0);
+    tabbar_window_title(t, sizeof t, "core-sw1", true);
+    CHECK(strcmp(t, APP_DISPLAY_NAME " | core-sw1 (disconnected)") == 0);
+    tabbar_window_title(t, sizeof t, "", false);
+    CHECK(strcmp(t, APP_DISPLAY_NAME) == 0);
+    tabbar_window_title(t, sizeof t, nullptr, false);
+    CHECK(strcmp(t, APP_DISPLAY_NAME) == 0);
+
+    char longname[1200];   /* 400 x "é" (2 bytes): cut to 120 columns, whole characters only */
+    for (size_t i = 0; i < 400; i++) {
+        longname[2 * i] = (char)0xC3;
+        longname[2 * i + 1] = (char)0xA9;
+    }
+    longname[800] = '\0';
+    tabbar_window_title(t, sizeof t, longname, false);
+    size_t prefix = strlen(APP_DISPLAY_NAME " | ");
+    CHECK(strlen(t) == prefix + 240 && ui_text_cols(t + prefix) == 120);
+
+    char tiny[8] = { 0 };   /* too small for the name: the bare app name (or as much as fits), never half */
+    tabbar_window_title(tiny, sizeof tiny, "abcdefgh", false);
+    CHECK(strncmp(tiny, APP_DISPLAY_NAME, sizeof tiny - 1) == 0);
+
+    char m[320] = { 0 };
+    const char *one[] = { "fw2" };
+    tabbar_quit_message(m, sizeof m, one, 1);
+    CHECK(strcmp(m, "1 session is still open (fw2). Close " APP_DISPLAY_NAME " and end it?") == 0);
+    const char *five[] = { "a", "b", "", "c", "d" };
+    tabbar_quit_message(m, sizeof m, five, 5);
+    CHECK(strcmp(m, "5 sessions are still open (a, b, c and 2 more). Close " APP_DISPLAY_NAME " and end them?") == 0);
+    const char *lng[] = { "a-very-long-session-name-indeed-yes" };
+    tabbar_quit_message(m, sizeof m, lng, 1);
+    CHECK(strstr(m, "(a-very-long-session-name\xE2\x80\xA6)") != nullptr || strstr(m, "(a-very-long-session-nam\xE2\x80\xA6)") != nullptr);
+    tabbar_quit_message(m, sizeof m, nullptr, 2);
+    CHECK(strcmp(m, "2 sessions are still open. Close " APP_DISPLAY_NAME " and end them?") == 0);
+}
+
 static void test_tab_menu(void)
 {
     te_keymap km;
@@ -1781,6 +1862,8 @@ int main(void)
     test_notifications();
     test_layout();
     test_tab_move();
+    test_winshell();
+    test_window_title();
     test_tab_menu();
     test_tab_rename();
     test_pager_prompt();

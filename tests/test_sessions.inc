@@ -543,9 +543,11 @@ static void test_ui_widgets(void)
 
 /* Right-click only opens a menu; Delete only asks; nothing changes until confirmed. */
 static int g_connects;
-static void sb_connect(void *u, const te_session *s, const te_session_eff *e, bool split)
+static te_sb_open g_connect_where;
+static void sb_connect(void *u, const te_session *s, const te_session_eff *e, te_sb_open where)
 {
-    (void)u; (void)s; (void)e; (void)split;
+    (void)u; (void)s; (void)e;
+    g_connect_where = where;
     g_connects++;
 }
 
@@ -656,6 +658,25 @@ static void test_sidebar_rules(void)
     CHECK(sidebar_button(&sb, 900.0f, 600.0f, 0, true, 1, 0));   /* click outside: just closes */
     CHECK(!sb.menu.open && !sb.form.open && sb.store.len == 2);
 
+    /* The menu offers both split directions; "split down" opens below. */
+    CHECK(sidebar_button(&sb, 50.0f, row0, 2, true, 1, 0) && sb.menu.open);
+    int down_at = -1;
+    for (size_t i = 0; i < sb.menu.n; i++) {
+        if (strcmp(sb.menu.items[i].label, "Connect in split down") == 0) {
+            down_at = (int)i;
+        }
+    }
+    CHECK(down_at == 2 && strcmp(sb.menu.items[1].label, "Connect in split right") == 0);
+    sb.focused = true;
+    for (int i = 0; i < 8 && sb.menu.hover != down_at; i++) {
+        (void)sidebar_key(&sb, TE_KEY_DOWN, 0, 0);
+    }
+    CHECK(sb.menu.hover == down_at && sidebar_key(&sb, TE_KEY_ENTER, 0, 0));
+    CHECK(!sb.menu.open && g_connects == 1 && g_connect_where == TE_SB_OPEN_SPLIT_DOWN);
+    CHECK(sidebar_key(&sb, TE_KEY_ENTER, 0, TE_MOD_SHIFT) && g_connects == 2 && g_connect_where == TE_SB_OPEN_SPLIT_RIGHT);
+    g_connects = 0;
+    sb.focused = false;
+
     sb.focused = true;
     CHECK(sidebar_key(&sb, TE_KEY_DELETE, 0, 0));
     CHECK(sb.form.open && sb.form.danger && sb.store.len == 2);   /* asks first */
@@ -671,7 +692,7 @@ static void test_sidebar_rules(void)
 
     CHECK(sidebar_text(&sb, "zzz") && sb.nvis == 0);              /* filter */
     CHECK(sidebar_key(&sb, TE_KEY_ESCAPE, 0, 0) && sb.filter[0] == '\0' && sb.nvis == 1);
-    CHECK(sidebar_key(&sb, TE_KEY_ENTER, 0, 0) && g_connects == 1);   /* Enter connects */
+    CHECK(sidebar_key(&sb, TE_KEY_ENTER, 0, 0) && g_connects == 1 && g_connect_where == TE_SB_OPEN_TAB);   /* Enter connects */
 
     g_paint_calls = 0;
     te_ui_colors uc = { 0 };

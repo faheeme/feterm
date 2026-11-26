@@ -51,6 +51,7 @@ typedef enum te_event_type {
 typedef struct te_event {
     te_event_type type;
     union {
+        struct { bool forced; } quit;   /* forced: a signal or OS shutdown, not the user */
         struct { int w, h; } resize;
         struct { bool focused; } focus;
         struct { te_key key; uint32_t cp; uint32_t mods; bool down; bool repeat; } key;

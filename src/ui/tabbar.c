@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "ui/paint.h"
 #include "util/str.h"
 
 void tabbar_init(te_tabbar_ui *ui)
@@ -178,4 +179,71 @@ size_t tabbar_drag_slot(size_t from, float x, float area_x, float tw, size_t nta
     }
     size_t slot = rel >= (float)ntabs ? ntabs - 1 : (size_t)rel;
     return slot;
+}
+
+/* Byte length of name's longest prefix within max_cols cells and max_bytes bytes, on a character boundary. */
+static size_t fit_prefix(const char *name, size_t max_cols, size_t max_bytes)
+{
+    size_t n = ui_text_fit(name, max_cols);
+    if (n > max_bytes) {
+        n = max_bytes;
+        while (n > 0 && ((unsigned char)name[n] & 0xC0) == 0x80) {
+            n--;
+        }
+    }
+    return n;
+}
+
+void tabbar_window_title(char *out, size_t outsz, const char *name, bool exited)
+{
+    if (out == nullptr || outsz == 0) {
+        return;
+    }
+    static const char suffix[] = " (disconnected)";
+    if (name == nullptr || name[0] == '\0') {
+        (void)str_copy(out, outsz, APP_DISPLAY_NAME);
+        return;
+    }
+    char cut[256] = { 0 };   /* window titles beyond ~120 columns are never seen anyway */
+    (void)str_copy_n(cut, sizeof cut, name, fit_prefix(name, 120, sizeof cut - 1));
+    if (str_fmt(out, outsz, "%s | %s%s", APP_DISPLAY_NAME, cut, exited ? suffix : "") != TE_OK) {
+        (void)str_copy(out, outsz, APP_DISPLAY_NAME);   /* never show half a character */
+    }
+}
+
+void tabbar_quit_message(char *out, size_t outsz, const char *const *names, size_t n)
+{
+    if (out == nullptr || outsz == 0) {
+        return;
+    }
+    out[0] = '\0';
+    char list[200] = { 0 };
+    size_t shown = 0;
+    for (size_t i = 0; names != nullptr && i < n && shown < 3; i++) {
+        const char *nm = names[i];
+        if (nm == nullptr || nm[0] == '\0') {
+            continue;
+        }
+        char cut[64] = { 0 };
+        size_t len = fit_prefix(nm, 24, sizeof cut - 4);   /* room for the ellipsis */
+        if (str_copy_n(cut, sizeof cut, nm, len) != TE_OK) {
+            break;
+        }
+        if (len < strlen(nm)) {
+            (void)str_append(cut, sizeof cut, "\xE2\x80\xA6");   /* ... */
+        }
+        if ((shown > 0 && str_append(list, sizeof list, ", ") != TE_OK) || str_append(list, sizeof list, cut) != TE_OK) {
+            break;
+        }
+        shown++;
+    }
+    if (shown > 0 && n > shown) {
+        char more[32] = { 0 };
+        (void)str_fmt(more, sizeof more, " and %zu more", n - shown);
+        (void)str_append(list, sizeof list, more);
+    }
+    char open[24] = { 0 };
+    (void)str_fmt(open, sizeof open, n == 1 ? "1 session is" : "%zu sessions are", n);
+    (void)str_fmt(out, outsz, "%s still open%s%s%s. Close %s and end %s?", open,
+                  shown > 0 ? " (" : "", list, shown > 0 ? ")" : "", APP_DISPLAY_NAME, n == 1 ? "it" : "them");
 }

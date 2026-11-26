@@ -16,7 +16,7 @@
 
 /* Menu items */
 enum {
-    M_CONNECT = 1, M_CONNECT_SPLIT, M_EDIT, M_DUPLICATE, M_RENAME, M_DELETE, M_COPY_HOST,
+    M_CONNECT = 1, M_CONNECT_SPLIT, M_CONNECT_SPLIT_DOWN, M_EDIT, M_DUPLICATE, M_RENAME, M_DELETE, M_COPY_HOST,
     M_NEW_SESSION, M_NEW_FOLDER, M_FOLDER_SETTINGS, M_RENAME_FOLDER, M_DELETE_FOLDER,
     M_QUICK, M_EXPAND_ALL, M_COLLAPSE_ALL, M_RELOAD,
 };
@@ -772,7 +772,7 @@ static size_t count_sessions_in(const te_sidebar *sb, const char *path)
     return n;
 }
 
-static void connect_node(te_sidebar *sb, int idx, bool split)
+static void connect_node(te_sidebar *sb, int idx, te_sb_open where)
 {
     const te_store_node *n = node(sb, idx);
     if (n == nullptr || n->folder || n->sess == nullptr || sb->host.connect == nullptr) {
@@ -787,7 +787,7 @@ static void connect_node(te_sidebar *sb, int idx, bool split)
     }
     te_session_eff eff = { 0 };
     store_effective(&sb->store, n->sess, &eff);
-    sb->host.connect(sb->host.user, n->sess, &eff, split);
+    sb->host.connect(sb->host.user, n->sess, &eff, where);
 }
 
 static void new_session_in(te_sidebar *sb, const char *folder)
@@ -808,8 +808,9 @@ static void run_menu(te_sidebar *sb, int id)
     const te_store_node *n = node(sb, sb->menu_node);
     const char *here = n != nullptr ? n->path : "";
     switch (id) {
-    case M_CONNECT:       connect_node(sb, sb->menu_node, false); break;
-    case M_CONNECT_SPLIT: connect_node(sb, sb->menu_node, true); break;
+    case M_CONNECT:            connect_node(sb, sb->menu_node, TE_SB_OPEN_TAB); break;
+    case M_CONNECT_SPLIT:      connect_node(sb, sb->menu_node, TE_SB_OPEN_SPLIT_RIGHT); break;
+    case M_CONNECT_SPLIT_DOWN: connect_node(sb, sb->menu_node, TE_SB_OPEN_SPLIT_DOWN); break;
     case M_EDIT:
         if (n != nullptr && n->sess != nullptr) {
             open_session_form(sb, F_SESSION_EDIT, n->sess, "Edit session");
@@ -1180,7 +1181,7 @@ static void submit_form(te_sidebar *sb)
         if (sb->host.connect != nullptr) {
             te_session_eff eff = { 0 };
             store_effective(&sb->store, &s, &eff);
-            sb->host.connect(sb->host.user, &s, &eff, false);
+            sb->host.connect(sb->host.user, &s, &eff, TE_SB_OPEN_TAB);
         }
         break;
     }
@@ -1213,7 +1214,8 @@ static void open_menu(te_sidebar *sb, int idx, float x, float y, const te_painte
     bool rw = sb->store_ok;
     if (nd != nullptr && !nd->folder) {
         items[n++] = menu_item(M_CONNECT, "Connect", "Enter", true);
-        items[n++] = menu_item(M_CONNECT_SPLIT, "Connect in split", "", true);
+        items[n++] = menu_item(M_CONNECT_SPLIT, "Connect in split right", "Shift+Enter", true);
+        items[n++] = menu_item(M_CONNECT_SPLIT_DOWN, "Connect in split down", "", true);
         items[n] = menu_item(M_EDIT, "Edit...", "", rw);
         items[n++].separator_before = true;
         items[n++] = menu_item(M_DUPLICATE, "Duplicate...", "", rw);
@@ -1425,7 +1427,7 @@ bool sidebar_button(te_sidebar *sb, float x, float y, int button, bool down, uin
     if (n != nullptr && n->folder) {
         toggle_folder(sb, idx);
     } else if (clicks >= 2) {
-        connect_node(sb, idx, false);
+        connect_node(sb, idx, TE_SB_OPEN_TAB);
     } else {
         sb->pressed = true;
         sb->press_x = x;
@@ -1570,7 +1572,7 @@ bool sidebar_key(te_sidebar *sb, te_key key, uint32_t cp, uint32_t mods)
         if (n != nullptr && n->folder) {
             toggle_folder(sb, sb->sel);
         } else if (n != nullptr) {
-            connect_node(sb, sb->sel, (mods & TE_MOD_SHIFT) != 0);
+            connect_node(sb, sb->sel, (mods & TE_MOD_SHIFT) != 0 ? TE_SB_OPEN_SPLIT_RIGHT : TE_SB_OPEN_TAB);
         }
         return true;
     case TE_KEY_DELETE:
