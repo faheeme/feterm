@@ -1,5 +1,5 @@
 Name:           feterm
-Version:        0.5.7
+Version:        0.5.8
 Release:        1%{?dist}
 Summary:        Modern terminal emulator with network-device syntax highlighting
 License:        MIT
@@ -46,6 +46,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.gitlab.faheeme.%{n
 %config(noreplace) %{_sysconfdir}/dnf/repos.override.d/50-feterm.repo
 
 %changelog
+* Thu Nov 26 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.8-1
+- Connect in split down from the session menu; closing the window asks
+  first while remote sessions are connected; title "FeTerm | <session>"
+
 * Thu Nov 19 2026 Faheem Essack <faheem.essack@gmail.com> - 0.5.7-1
 - Tab right-click menu, double-click rename and drag to reorder; anti-idle
   sends a space and a backspace, fixing ^M on Arista EOS and FortiOS
