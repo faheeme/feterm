@@ -1,3 +1,11 @@
+feterm (0.5.8-1~ppa1) resolute; urgency=medium
+
+  * New upstream release: connect a session in a split below; closing the
+    window asks first while SSH, Telnet or serial sessions are connected;
+    the window title shows "FeTerm | <session>".
+
+ -- Faheem Essack <faheem.essack@gmail.com>  Thu, 26 Nov 2026 15:30:00 +0200
+
 feterm (0.5.7-1~ppa1) resolute; urgency=medium
 
   * New upstream release: tab right-click menu, double-click rename and
